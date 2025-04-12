@@ -1,18 +1,14 @@
 ---
-title: "Project 2: Birth Year"
-author:
-  - Sofiya Antonyuk
-  - Edoardo Pennesi
-  - Dorothy Chepkoech
-  - Andreea Badache
-  - Steve Omollo
+title: 'Project 2: Birth Year'
+author: "Sofiya Antonyuk  \nEdoardo Pennesi  \nDorothy Chepkoech  \nAndreea Badache
+  \ \nSteve Omollo\n"
 date: "`r Sys.Date()`"
 output:
-  html_document: default
   pdf_document: default
+  html_document: default
   word_document: default
+  bookdown::pdf_document2: default
 ---
-
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
@@ -24,54 +20,175 @@ knitr::opts_chunk$set(
 # Libraries
 library(ggplot2)
 library(plotly)
+library(tidyverse)
+library(kableExtra)
 ```
 
-#2.2 Project 2: Birth year
-The next table summarizes, based on a survey, the number of children that
-had at least one dose of the Varicella vaccine. It gives the number of vac-
-cinated children (Vaccinated) among the number of children in the survey
-(Sample Size). The information is provided for 3 regions of the US, and split
-according to birth cohort (2011-2020)
 
-```{r}
-
+```{r data import, echo=FALSE, include=FALSE}
 # Import datasets
 vacc_data <- read.csv("vaccination_data.csv")
 
 # Preview
 head(vacc_data)
-
 ```
 
-#1 
-Derive analytically the posterior of the vaccination coverage per birth
-year and region. Use a conjugate prior that (1) reflects no knowledge
-on the vaccination coverage, and (2) reflects that vaccination coverage
-is typically around 90% or higher. Give posterior summary measures
-of the vaccination coverage per birth year and region. Is the choice of
-the prior impacting your results?
+\newpage
+
+The next table summarizes, based on a survey, the number of children that had at least one dose of the Varicella vaccine. It gives the number of vaccinated children (Vaccinated) among the number of children in the survey (Sample Size). The information is provided for 3 regions of the US, and split according to birth cohort (2011-2020).
+
+```{r data table, echo=FALSE}
+vacc_data %>%
+  knitr::kable(
+    format = "latex", 
+    booktabs = TRUE,
+    caption = "Vaccination Data"
+  ) %>%
+  kableExtra::kable_styling(latex_options = c("hold_position"))
+```
+
+\newpage 
+
+# Question 1 
+Derive analytically the posterior of the vaccination coverage per birth year and region. Use a conjugate prior that (1) reflects no knowledge on the vaccination coverage, and (2) reflects that vaccination coverage is typically around 90% or higher. Give posterior summary measures of the vaccination coverage per birth year and region. Is the choice of the prior impacting your results?
+
+The experiment can be model using a binomial likelihood:
+
+$$
+P(x | \theta) = \binom{n}{x} \theta^x (1 - \theta)^{n - x}
+$$
+
+Where:
+- \( x \) is the number of vaccinated children (observed data),
+- \( n \) is the sample size (total number of children in the survey),
+- \( \theta \) is the vaccination rate (probability of a child being vaccinated), which is the parameter we want to estimate.
+
+
+The conjugate prior of a binomial likelihood is a beta distribution. To reflect no knowledge on the vaccination coverage we can can set \(\alpha\) and \(\beta\) parameters of the \(beta\) distribution equal to 1. This gives us a uniform prior on \(\theta\) meaning that all values of vaccination rate are equally likely for $\theta \in [0,1]$.
+
+Indeed, given the beta distribution:
+
+$$
+f(\theta;\alpha,\beta) = \frac{\theta^{\alpha-1}1-\theta^{\beta-1}}{B(\alpha,\beta)}
+$$
+for \(\alpha\) and \(\beta\) equal to 1, \(f(\theta;\alpha,\beta)\) it boils down to 1.
+
+The posterior distribution can be found analytically using the formula:
+
+$$
+P(\theta | x, n) \propto \theta^{x + \alpha - 1} (1 - \theta)^{n - x + \beta - 1}
+$$
+
+This is a Beta distribution with updated parameters:
+
+$$
+\theta | x, n \sim \text{Beta}(x + \alpha, n - x + \beta)
+$$
+We now substitute \(x\) and \(n\) with the corresponding value per birth year and region and calculate the posterior summary measures as follows:
+
+**posterior mean**
+
+\[
+\text{Posterior Mean} = \frac{\alpha_{\text{posterior}}}{\alpha_{\text{posterior}} + \beta_{\text{posterior}}}
+\]
+
+**posterior variance**
+
+\[
+\text{Posterior Variance} = \frac{\alpha_{\text{posterior}} \cdot \beta_{\text{posterior}}}{(\alpha_{\text{posterior}} + \beta_{\text{posterior}})^2 (\alpha_{\text{posterior}} + \beta_{\text{posterior}} + 1)}
+\]
+
+**posterior mode** (if \( \alpha_{\text{posterior}} > 1 \) and \( \beta_{\text{posterior}} > 1 \))
+
+\[
+\text{Posterior Mode} = \frac{\alpha_{\text{posterior}} - 1}{\alpha_{\text{posterior}} + \beta_{\text{posterior}} - 2}
+\]
+
+```{r question 1 with uninformative prior, echo=F, include=F}
+# Define prior and posterior parameters
+alpha_prior <- 1
+beta_prior <- 1
+
+# Define a function to calculate posterior summary measures for each sample
+calculate_posterior <- function(vaccinated, sample_size, alpha_prior, beta_prior) {
+  # Calculate the posterior parameters
+  alpha_posterior <- alpha_prior + vaccinated
+  beta_posterior <- beta_prior + (sample_size - vaccinated)
+  
+  # Compute summary measures for the posterior distribution
+  posterior_mean <- alpha_posterior / (alpha_posterior + beta_posterior)
+  posterior_variance <- (alpha_posterior * beta_posterior) / ((alpha_posterior + beta_posterior)^2 * (alpha_posterior + beta_posterior + 1))
+  posterior_mode <- (alpha_posterior - 1) / (alpha_posterior + beta_posterior - 2)  # Mode (if alpha > 1 and beta > 1)
+
+  # Return a list with posterior summary measures
+  list(
+    alpha_posterior = alpha_posterior,
+    beta_posterior = beta_posterior,
+    posterior_mean = posterior_mean,
+    posterior_variance = posterior_variance,
+    posterior_mode = posterior_mode
+  )
+}
+
+posterior_SM_B.1.1 <- calculate_posterior(vacc_data$Vaccinated, vacc_data$Sample.Size, alpha_prior=alpha_prior, beta_prior=beta_prior)
+```
+
+```{r Q1.1 table, echo=FALSE}
+# Combine the two tables to have geo and b_Year
+post.summary.b1.1 <- cbind(vacc_data, posterior_SM_B.1.1)
+
+# Select wanted variables
+post.summary.b1.1_selected <- post.summary.b1.1 %>%
+  select(
+    `Geography`,
+    `Birth.Year`,
+    `posterior_mean`, 
+    `posterior_variance`,
+    `posterior_mode`
+  )
+
+# Put them into a table
+post.summary.b1.1_selected %>%
+  knitr::kable(
+    format = "latex", 
+    booktabs = TRUE,
+    caption = "Posterior summary measurs for the beta(1,1) case"
+  ) %>%
+  kableExtra::kable_styling(latex_options = c("hold_position"))
+```
+
+
+
+
+# Question 2
+Investigate whether there is a change in the vaccination coverage over the birth years 2011-2019 using a logistic regression model:
+
+$$
+Y_{ij} \sim Binom(\pi_{ij} , N_{ij} )
+$$
+with 
+
+$$
+\text{logit}(\pi_{ij}) = \beta_{0i} + \beta_{1i} \cdot \text{BirthYear}_j
+$$
+where
+$$
+\text{logit}(\pi_{ij}) = \log\left(\frac{\pi_{ij}}{1 - \pi_{ij}}\right)
+$$
+- \(i\) is the location,
+
+- \(j\) is birth cohort,
+
+- \(\pi_{ij}\) is the vaccination coverage. 
+
+Assume non-informative priors for the parameters to be estimated. Write and explain the code in BUGS language
 
 ```{r}
 
 
 ```
 
-#2
-Investigate whether there is a change in the vaccination coverage over
-the birth years 2011-2019 using a logistic regression model
-Yij ∼ Binom(πij , Nij )
-with
-logit(πij ) = β0 + β1 ∗ BirthY earj ,
-where i is the location, j is birth cohort and πij is the vaccination cover-
-age. Assume non-informative priors for the parameters to be estimated.
-Write and explain the code in BUGS language
-
-```{r}
-
-
-```
-
-#3
+# Question 3
 Run the MCMC method and check convergence of the MCMC chains.
 Give the details on how you checked convergence
 
@@ -80,16 +197,15 @@ Give the details on how you checked convergence
 
 ```
 
-#4
-Make a plot of the posterior densities and give summary measures of the
-posterior distributions of the model parameters. Interpret the results.
+# Question 4
+Make a plot of the posterior densities and give summary measures of the posterior distributions of the model parameters. Interpret the results.
 
 ```{r}
 
 
 ```
 
-#5
+# Question 5
 Give the posterior estimate of the vaccination coverage per birth year.
 Compare with the analytical results you obtained in Question 1.
 
@@ -98,57 +214,49 @@ Compare with the analytical results you obtained in Question 1.
 
 ```
 
-#6
-Secondly, investigate whether the vaccination coverage trends are dis-
-tinct at the different locations by adding a location-specific intercept
-and slope:
-logit(πij ) = β0i + β1i ∗ BirthYearj
+# Question 6
+Secondly, investigate whether the vaccination coverage trends are distinct at the different locations by adding a location-specific intercept and slope:
 
-Use data from the years 2011-2019. Assume non-informative priors for
-the parameters to be estimated. Write the code in BUGS language.
-Give a brief summary of the convergence checks you performed. Give
-the posterior estimates of this model.
+$$
+\text{logit}(\pi_{ij}) = \beta_{0i} + \beta_{1i} \cdot \text{BirthYear}_j
+$$
+
+Use data from the years 2011-2019. Assume non-informative priors for the parameters to be estimated. Write the code in BUGS language. Give a brief summary of the convergence checks you performed. Give the posterior estimates of this model.
 
 ```{r}
 
 
 ```
 
-#7
-What is the probability (a posteriori) that there is an increase in vac-
-cination coverage (per location)?
+# Question 7
+What is the probability (a posteriori) that there is an increase in vaccination coverage (per location)?
 
 ```{r}
 
 
 ```
 
-#8
-Make a plot of the estimated vaccination coverage (per location and
-birth year), including the uncertainty on the estimates. Include also
-the observed vaccination proportion in the plot.
+# Question 8
+Make a plot of the estimated vaccination coverage (per location and birth year), including the uncertainty on the estimates. Include also the observed vaccination proportion in the plot.
 
 ```{r}
 
 
 ```
 
-#9
-Investigate whether the observed number of vaccinated children in 2020
-is in line with the expectations from earlier years. For this, compare
-the observed number of vaccinated children in 2020 with the prediction
-intervals for number of vaccinated children in 2020.
+# Question 9
+Investigate whether the observed number of vaccinated children in 2020 is in line with the expectations from earlier years. For this, compare the observed number of vaccinated children in 2020 with the prediction intervals for number of vaccinated children in 2020.
+
 ```{r}
 
 
 ```
 
 
-#10
-Make pairwise comparisons of the vaccination coverage in 2019 by es-
-timating the ratio of the vaccination coverage in 2019 in two locations.
+# Question 10
+Make pairwise comparisons of the vaccination coverage in 2019 by estimating the ratio of the vaccination coverage in 2019 in two locations.
 Interpret the results.
-7
+
 ```{r}
 
 
