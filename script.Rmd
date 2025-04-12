@@ -22,6 +22,7 @@ library(ggplot2)
 library(plotly)
 library(tidyverse)
 library(kableExtra)
+library(ggplot2)
 ```
 
 
@@ -52,6 +53,8 @@ vacc_data %>%
 # Question 1 
 Derive analytically the posterior of the vaccination coverage per birth year and region. Use a conjugate prior that (1) reflects no knowledge on the vaccination coverage, and (2) reflects that vaccination coverage is typically around 90% or higher. Give posterior summary measures of the vaccination coverage per birth year and region. Is the choice of the prior impacting your results?
 
+## Answer:
+
 The experiment can be model using a binomial likelihood:
 
 $$
@@ -59,58 +62,65 @@ P(x | \theta) = \binom{n}{x} \theta^x (1 - \theta)^{n - x}
 $$
 
 Where:
+
 - \( x \) is the number of vaccinated children (observed data),
 - \( n \) is the sample size (total number of children in the survey),
 - \( \theta \) is the vaccination rate (probability of a child being vaccinated), which is the parameter we want to estimate.
 
 
-The conjugate prior of a binomial likelihood is a beta distribution. To reflect no knowledge on the vaccination coverage we can can set \(\alpha\) and \(\beta\) parameters of the \(beta\) distribution equal to 1. This gives us a uniform prior on \(\theta\) meaning that all values of vaccination rate are equally likely for $\theta \in [0,1]$.
+The conjugate prior of a binomial likelihood is a beta distribution. To reflect no knowledge on the vaccination coverage we can set \(\alpha\) and \(\beta\) parameters of the \(beta\) prior distribution equal to 1. This gives us a uniform prior on \(\theta\), meaning that all values of vaccination rate are equally likely for $\theta \in [0,1]$.
 
 Indeed, given the beta distribution:
 
 $$
 f(\theta;\alpha,\beta) = \frac{\theta^{\alpha-1}1-\theta^{\beta-1}}{B(\alpha,\beta)}
 $$
-for \(\alpha\) and \(\beta\) equal to 1, \(f(\theta;\alpha,\beta)\) it boils down to 1.
+for \(\alpha\) and \(\beta\) equal to 1, \(f(\theta;\alpha,\beta)\) boils down to 1.
 
 The posterior distribution can be found analytically using the formula:
 
 $$
 P(\theta | x, n) \propto \theta^{x + \alpha - 1} (1 - \theta)^{n - x + \beta - 1}
 $$
-
 This is a Beta distribution with updated parameters:
 
 $$
-\theta | x, n \sim \text{Beta}(x + \alpha, n - x + \beta)
+P(\theta | x, n) \sim \text{Beta}(x + \alpha, n - x + \beta)
 $$
 We now substitute \(x\) and \(n\) with the corresponding value per birth year and region and calculate the posterior summary measures as follows:
 
 **posterior mean**
 
-\[
+$$
 \text{Posterior Mean} = \frac{\alpha_{\text{posterior}}}{\alpha_{\text{posterior}} + \beta_{\text{posterior}}}
-\]
+$$
 
 **posterior variance**
 
-\[
+$$
 \text{Posterior Variance} = \frac{\alpha_{\text{posterior}} \cdot \beta_{\text{posterior}}}{(\alpha_{\text{posterior}} + \beta_{\text{posterior}})^2 (\alpha_{\text{posterior}} + \beta_{\text{posterior}} + 1)}
-\]
+$$
 
 **posterior mode** (if \( \alpha_{\text{posterior}} > 1 \) and \( \beta_{\text{posterior}} > 1 \))
 
-\[
+$$
 \text{Posterior Mode} = \frac{\alpha_{\text{posterior}} - 1}{\alpha_{\text{posterior}} + \beta_{\text{posterior}} - 2}
-\]
+$$
 
-```{r question 1 with uninformative prior, echo=F, include=F}
+We report the results for the first case (uninformative prior assumption) in table 2. We also plot the posterior densities for each year and each region in figure 1. 
+
+We now repeat the same procedure but we assume a prior density that reflects a vaccination rate of 90% or more as most likely. We set \(\alpha = 18\) and \(\beta = 2\) so that the mean and mode of the prior are around 0.9 or more (mean=0.9 and mode=0.944). Results are reported in table 3 and figure 2.
+
+In this second case, since the prior and the likelihood tend to convey similar information, we observe a smaller posterior variance and also a tendency for higher values of posterior mean and median. 
+
+```{r Q1.1 with uninformative prior, echo=F, include=F}
 # Define prior and posterior parameters
 alpha_prior <- 1
 beta_prior <- 1
 
 # Define a function to calculate posterior summary measures for each sample
 calculate_posterior <- function(vaccinated, sample_size, alpha_prior, beta_prior) {
+  
   # Calculate the posterior parameters
   alpha_posterior <- alpha_prior + vaccinated
   beta_posterior <- beta_prior + (sample_size - vaccinated)
@@ -130,25 +140,26 @@ calculate_posterior <- function(vaccinated, sample_size, alpha_prior, beta_prior
   )
 }
 
-posterior_SM_B.1.1 <- calculate_posterior(vacc_data$Vaccinated, vacc_data$Sample.Size, alpha_prior=alpha_prior, beta_prior=beta_prior)
+posterior_SM_B.10.20 <- calculate_posterior(vacc_data$Vaccinated, vacc_data$Sample.Size, alpha_prior=alpha_prior, beta_prior=beta_prior)
 ```
 
+\newpage
 ```{r Q1.1 table, echo=FALSE}
-# Combine the two tables to have geo and b_Year
-post.summary.b1.1 <- cbind(vacc_data, posterior_SM_B.1.1)
+# Combine the two tables to have Geography and Birth.Year
+post.summary.B.10.20 <- cbind(vacc_data, posterior_SM_B.10.20)
 
 # Select wanted variables
-post.summary.b1.1_selected <- post.summary.b1.1 %>%
+post.summary.B.10.20_selected <- post.summary.B.10.20 %>%
   select(
-    `Geography`,
-    `Birth.Year`,
-    `posterior_mean`, 
-    `posterior_variance`,
-    `posterior_mode`
-  )
+  "Geography",
+  "Birth.Year",
+  "posterior_mean", 
+  "posterior_variance",
+  "posterior_mode"
+)
 
 # Put them into a table
-post.summary.b1.1_selected %>%
+post.summary.B.10.20_selected %>%
   knitr::kable(
     format = "latex", 
     booktabs = TRUE,
@@ -157,8 +168,130 @@ post.summary.b1.1_selected %>%
   kableExtra::kable_styling(latex_options = c("hold_position"))
 ```
 
+\newpage
+```{r Q1.1 posterior plots, echo=FALSE, fig.cap="Posterior densities by region and year assuming an uninformative prior."}
+
+# Function to generate the posterior densities
+posterior_densities <- function(alpha_post, beta_post, region, year) {
+  # Create a theta sequence for plotting
+  theta_seq <- seq(0, 1, length.out = 1000)
+  
+  # Create an empty data frame to store densities
+  density_data <- data.frame()
+  
+  # Loop over each region and year
+  for (i in 1:length(alpha_post)) {
+    # Get the alpha and beta corresponding to the current region and year
+    alpha_i <- alpha_post[i]
+    beta_i <- beta_post[i]
+    region_i <- region[i]
+    year_i <- year[i]
+    
+    # Calculate posterior density for each alpha-beta pair
+    density_values <- dbeta(theta_seq, alpha_i, beta_i)
+    
+    # Create the data frame
+    parameters <- data.frame(
+      Theta = theta_seq,
+      Density = density_values,
+      Alpha = alpha_i,
+      Beta = beta_i,
+      Region = region_i,
+      Year = year_i
+    )
+    
+    # Append to the main density data frame
+    density_data <- rbind(density_data, parameters)
+  }
+  
+  return(density_data) # Return the final data frame
+}
 
 
+# Generate density data using the function above
+density_data <- posterior_densities(
+  post.summary.B.10.20$alpha_posterior,
+  post.summary.B.10.20$beta_posterior,
+  post.summary.B.10.20$Geography,
+  post.summary.B.10.20$Birth.Year
+)
+
+# Plot the posterior densities wrapped by year
+ggplot(density_data, aes(x = Theta, y = Density, color = Region)) +
+  geom_line() +
+  facet_wrap(~Year, ncol = 2, nrow = 5) +
+  labs(
+    title = "Posterior Densities by Region and Year",
+    x = "Theta",
+    y = "Density"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+```
+
+\newpage
+
+```{r Q1.2 with informative prior, echo=F, include=F}
+# Define prior and posterior parameters
+alpha_prior <- 18
+beta_prior <- 2
+
+posterior_SM_B.10.20 <- calculate_posterior(vacc_data$Vaccinated, vacc_data$Sample.Size, alpha_prior=alpha_prior, beta_prior=beta_prior)
+```
+
+\newpage
+```{r Q1.2 table, echo=FALSE}
+# Combine the two tables to have Geography and Birth.Year
+post.summary.B.10.20 <- cbind(vacc_data, posterior_SM_B.10.20)
+
+# Select wanted variables
+post.summary.B.10.20_selected <- post.summary.B.10.20 %>%
+  select(
+  "Geography",
+  "Birth.Year",
+  "posterior_mean", 
+  "posterior_variance",
+  "posterior_mode"
+)
+
+# Put them into a table
+post.summary.B.10.20_selected %>%
+  knitr::kable(
+    format = "latex", 
+    booktabs = TRUE,
+    caption = "Posterior summary measurs for the beta(18,2) case"
+  ) %>%
+  kableExtra::kable_styling(latex_options = c("hold_position"))
+```
+
+\newpage
+```{r Q1.2 posterior plots, echo=FALSE, fig.cap="Posterior densities by region and year assuming an expected vaccination rate of 90% or higher."}
+# Generate density data using the function created in the previous chunk
+density_data <- posterior_densities(
+  post.summary.B.10.20$alpha_posterior,
+  post.summary.B.10.20$beta_posterior,
+  post.summary.B.10.20$Geography,
+  post.summary.B.10.20$Birth.Year
+)
+
+# Plot the posterior densities wrapped by year
+ggplot(density_data, aes(x = Theta, y = Density, color = Region)) +
+  geom_line() +
+  facet_wrap(~Year, ncol = 2, nrow = 5) +
+  labs(
+    title = "Posterior Densities by Region and Year for the beta(18,2) case",
+    x = "Theta",
+    y = "Density"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+```
+
+
+
+\newpage
 
 # Question 2
 Investigate whether there is a change in the vaccination coverage over the birth years 2011-2019 using a logistic regression model:
