@@ -1,0 +1,14 @@
+ 
+model {
+  for (i in 1:N_region) {  # Loop over regions
+  for (j in 1:N_year) {  # Loop over years (cohorts)
+  Y[i, j] ~ dbin(pi[i, j], N[i, j]) # Likelihood for region i and year j
+  logit(pi[i, j]) <- beta0 + beta1 * BirthYear[j] # same beta0, beta1 for all regions
+   }
+  }
+
+  # Non-informative priors for intercept and slope (shared across regions)
+  beta0 ~ dnorm(0, 0.0001)
+  beta1 ~ dnorm(0, 0.0001)
+}
+

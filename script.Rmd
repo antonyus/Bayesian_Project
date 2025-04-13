@@ -23,6 +23,7 @@ library(plotly)
 library(tidyverse)
 library(kableExtra)
 library(ggplot2)
+library(R2jags)
 ```
 
 
@@ -316,19 +317,131 @@ $$
 
 Assume non-informative priors for the parameters to be estimated. Write and explain the code in BUGS language
 
-```{r}
+The code structure is provided below. First we specify the model structure. For each region and year cohort we ask to calculate the binomial likelihood by using a loop function (see chunk below). 
 
-
+```{r eval=FALSE, echo=TRUE}
+for (i in 1:N_region) {  # Loop over regions
+for (j in 1:N_year) {  # Loop over years (cohorts)
+Y[i, j] ~ dbin(pi[i, j], N[i, j]) # Likelihood for region i and year j
 ```
+
+The we specify the logistic function. As it can be seen below we did not indexed the beta coefficients. This way only one intercept and one beta coefficient for the effect of year of birth will be calculated for all regions. 
+
+```{r eval=FALSE, echo=TRUE}
+logit(pi[i, j]) <- beta0 + beta1 * BirthYear[j] # same beta0, beta1 for all regions
+```
+
+The a non informative prior is specified. Since we a re working with the logit of the vaccination rate we cannot use a beta distribution as in question one. The support for the logit of the vaccination rate is infinite. Therefore we use a normal distribution centered around zero but with very high variance. In BUGS language this means low precision, hence the code below.
+
+```{r eval=FALSE, echo=TRUE}
+# Non-informative priors for intercept and slope (shared across regions)
+  beta0 ~ dnorm(0, 0.0001)
+  beta1 ~ dnorm(0, 0.0001)
+```
+
+The rest of the code specifies the matrix to be used as data input and finally the model run. We used a burn in of 500 (meaning that the first 500 samples are discarded), thinning equal to 2 (meaning only every other sample are retained), and then three chains are run.
+
+```{r eval=FALSE, echo=TRUE}
+
+# Run the model
+fit <- jags(
+  data = bugs_data,
+  parameters.to.save = params,
+  model.file = "logistic_model.bug",
+  n.chains = 3,
+  n.iter = 5000,
+  n.burnin = 500,
+  n.thin = 2
+)
+```
+
+Overall, the full code is:
+
+```{r Q2 model log reg in BUGS, echo=TRUE}
+# Model structure assuming one intercept and slop for all regions
+model_structure <- " 
+model {
+  for (i in 1:N_region) {  # Loop over regions
+  for (j in 1:N_year) {  # Loop over years (cohorts)
+  Y[i, j] ~ dbin(pi[i, j], N[i, j]) # Likelihood for region i and year j
+  logit(pi[i, j]) <- beta0 + beta1 * BirthYear[j] # same beta0, beta1 for all regions
+   }
+  }
+
+  # Non-informative priors for intercept and slope (shared across regions)
+  beta0 ~ dnorm(0, 0.0001)
+  beta1 ~ dnorm(0, 0.0001)
+}
+"
+
+writeLines(model_structure, "logistic_model_Q.2.bug")
+
+# Prepare the matrix for Y (vaccinated) and N (sample size) 
+# by region and year of birth
+
+vacc_data <- read.csv("vaccination_data.csv")
+
+Y <- matrix(vacc_data$Vaccinated,
+            nrow=length(unique(vacc_data$Geography)), byrow=TRUE)
+
+N <- matrix(vacc_data$Sample.Size,
+            nrow=length(unique(vacc_data$Geography)), byrow=TRUE)
+
+
+# Define the rows as regions and the columns as years
+row.names(Y) <- unique(vacc_data$Geography)
+colnames(Y) <- min(vacc_data$Birth.Year):max(vacc_data$Birth.Year)
+
+row.names(N) <- unique(vacc_data$Geography)
+colnames(N) <- min(vacc_data$Birth.Year):max(vacc_data$Birth.Year)
+
+bugs_data <- list(
+  Y = Y,
+  N = N,
+  BirthYear = vacc_data$Birth.Year,
+  N_region = length(unique(vacc_data$Geography)),
+  N_year = length(unique(vacc_data$Birth.Year))
+)
+
+# Parameters to monitor
+params <- c("beta0", "beta1")
+
+# Run the model
+fit <- jags(
+  data = bugs_data,
+  parameters.to.save = params,
+  model.file = "logistic_model_Q.2.bug",
+  n.chains = 3,
+  n.iter = 5000,
+  n.burnin = 500,
+  n.thin = 2
+)
+```
+
+\newpage
 
 # Question 3
 Run the MCMC method and check convergence of the MCMC chains.
 Give the details on how you checked convergence
 
-```{r}
 
+Looking at the trace plots below, for both \(\beta_0\) and \(\beta_1\) we can see that the chains jump around the same general range and visit different areas of the parameter space. No drift is apparent. All chains seem to oscillate around a similar range of values. A visual check favours a good convergence of the model. 
+We then present Gelman-Rubin diagnostic plots which compare the variance within each Markov chain to the variance between multiple chains. 
 
+```{r Q3 trace plots, echo=FALSE, fig.cap="Trace plots for the logistic model in question 2. Each color represent a chain"}
+# Load the coda package
+library(coda)
+
+# Convert output to mcmc object
+mcmc_samples <- as.mcmc(fit)
+
+# Plot trace plots
+traceplot(mcmc_samples[, c("beta0", "beta1")])
 ```
+```{r Q3 gelman plots, echo=FALSE, fig.cap="Gelman plots for the logistic model in question 2"}
+gelman.plot(mcmc_samples)
+```
+\newpage
 
 # Question 4
 Make a plot of the posterior densities and give summary measures of the posterior distributions of the model parameters. Interpret the results.
@@ -357,7 +470,6 @@ $$
 Use data from the years 2011-2019. Assume non-informative priors for the parameters to be estimated. Write the code in BUGS language. Give a brief summary of the convergence checks you performed. Give the posterior estimates of this model.
 
 ```{r}
-
 
 ```
 
