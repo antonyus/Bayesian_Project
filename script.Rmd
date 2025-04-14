@@ -317,7 +317,8 @@ $$
 
 Assume non-informative priors for the parameters to be estimated. Write and explain the code in BUGS language
 
-The code structure is provided below. First we specify the model structure. For each region and year cohort we ask to calculate the binomial likelihood by using a loop function (see chunk below). 
+## Answer  
+The code written in BUGS language is provided below. First we specify the model structure. For each region and year cohort we ask to calculate the binomial likelihood by using a loop function (see chunk below). 
 
 ```{r eval=FALSE, echo=TRUE}
 for (i in 1:N_region) {  # Loop over regions
@@ -325,13 +326,13 @@ for (j in 1:N_year) {  # Loop over years (cohorts)
 Y[i, j] ~ dbin(pi[i, j], N[i, j]) # Likelihood for region i and year j
 ```
 
-The we specify the logistic function. As it can be seen below we did not indexed the beta coefficients. This way only one intercept and one beta coefficient for the effect of year of birth will be calculated for all regions. 
+Then we specify the logistic function. As it can be seen below we did not index the beta coefficients. This way only one intercept and one beta coefficient for the effect of year of birth will be calculated for all regions as requested in the question. 
 
 ```{r eval=FALSE, echo=TRUE}
 logit(pi[i, j]) <- beta0 + beta1 * BirthYear[j] # same beta0, beta1 for all regions
 ```
 
-The a non informative prior is specified. Since we a re working with the logit of the vaccination rate we cannot use a beta distribution as in question one. The support for the logit of the vaccination rate is infinite. Therefore we use a normal distribution centered around zero but with very high variance. In BUGS language this means low precision, hence the code below.
+Then a non informative prior is specified. Since we are working with the logit of the vaccination rate, we cannot use a beta distribution as in question one, since this would be bounded between 0 and 1. The support for the logit of the vaccination rate is indeed $(-\infty, \infty)$. Therefore we use a normal distribution centered around zero but with very high variance. In BUGS language this means low precision, hence the code below.
 
 ```{r eval=FALSE, echo=TRUE}
 # Non-informative priors for intercept and slope (shared across regions)
@@ -339,10 +340,9 @@ The a non informative prior is specified. Since we a re working with the logit o
   beta1 ~ dnorm(0, 0.0001)
 ```
 
-The rest of the code specifies the matrix to be used as data input and finally the model run. We used a burn in of 500 (meaning that the first 500 samples are discarded), thinning equal to 2 (meaning only every other sample are retained), and then three chains are run.
+The rest of the code specifies the matrix to be used as data input and finally the model run commands. We used a burn-in of 500 (meaning that the first 500 samples are discarded), thinning equal to 2 (meaning only every other sample are retained), and then three chains are run.
 
 ```{r eval=FALSE, echo=TRUE}
-
 # Run the model
 fit <- jags(
   data = bugs_data,
@@ -357,7 +357,7 @@ fit <- jags(
 
 Overall, the full code is:
 
-```{r Q2 model log reg in BUGS, echo=TRUE}
+```{r Q2 model log reg in BUGS, echo=TRUE, results='hide'}
 # Model structure assuming one intercept and slop for all regions
 model_structure <- " 
 model {
@@ -373,12 +373,11 @@ model {
   beta1 ~ dnorm(0, 0.0001)
 }
 "
-
+# Save the model structure in a text file
 writeLines(model_structure, "logistic_model_Q.2.bug")
 
 # Prepare the matrix for Y (vaccinated) and N (sample size) 
 # by region and year of birth
-
 vacc_data <- read.csv("vaccination_data.csv")
 
 Y <- matrix(vacc_data$Vaccinated,
@@ -416,6 +415,8 @@ fit <- jags(
   n.burnin = 500,
   n.thin = 2
 )
+
+print(fit)
 ```
 
 \newpage
@@ -424,7 +425,7 @@ fit <- jags(
 Run the MCMC method and check convergence of the MCMC chains.
 Give the details on how you checked convergence
 
-
+## Answer  
 Looking at the trace plots below, for both \(\beta_0\) and \(\beta_1\) we can see that the chains jump around the same general range and visit different areas of the parameter space. No drift is apparent. All chains seem to oscillate around a similar range of values. A visual check favours a good convergence of the model. 
 We then present Gelman-Rubin diagnostic plots which compare the variance within each Markov chain to the variance between multiple chains. 
 
@@ -438,9 +439,14 @@ mcmc_samples <- as.mcmc(fit)
 # Plot trace plots
 traceplot(mcmc_samples[, c("beta0", "beta1")])
 ```
+
+
 ```{r Q3 gelman plots, echo=FALSE, fig.cap="Gelman plots for the logistic model in question 2"}
-gelman.plot(mcmc_samples)
+gelman.plot(mcmc_samples[, c("beta0", "beta1")])
 ```
+
+The plot reports on the \(y\) axis the variance between multiple chains and traces its reduction as the iterations on the \(x\) axis increase. In essence, a decrease towards a value of 1 is a sign of convergence. In our case, for both \(\beta_0\) and \(\beta_1\) we see a quick drop of the shrink factor (variance within and between the chains for each parameter) before 1000 iterations and the shrink factor stabilizes around 1 thereafter particularly after 4000 iterations when also the 97.5th percentile of the shrink factor seems to be close to 1. This can be interpreted as a good convergence.
+
 \newpage
 
 # Question 4
