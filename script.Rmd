@@ -21,9 +21,14 @@ knitr::opts_chunk$set(
 library(ggplot2)
 library(plotly)
 library(tidyverse)
+library(dplyr)
+library(knitr)
 library(kableExtra)
 library(ggplot2)
 library(R2jags)
+library(coda)
+library(gridExtra)
+library(posterior)
 ```
 
 
@@ -340,7 +345,7 @@ Then a non informative prior is specified. Since we are working with the logit o
   beta1 ~ dnorm(0, 0.0001)
 ```
 
-The rest of the code specifies the matrix to be used as data input and finally the model run commands. We used a burn-in of 500 (meaning that the first 500 samples are discarded), thinning equal to 2 (meaning only every other sample are retained), and then three chains are run.
+The rest of the code specifies the matrix to be used as data input and finally the model run commands. We used a burn-in of 500 (meaning that the first 500 samples are discarded), thinning equal to 2 (meaning only every other sample are retained), and then three chains are run. Since BUGS is a declarative language, we have to explicitly tell what the model structure is, then the software will automatically choose the Markov Chain Monte Carlo algorithm (by default Gibbs sampling). 
 
 ```{r eval=FALSE, echo=TRUE}
 # Run the model
@@ -357,7 +362,7 @@ fit <- jags(
 
 Overall, the full code is:
 
-```{r Q2 model log reg in BUGS, echo=TRUE, results='hide'}
+```{r Q2 model log reg in BUGS, echo=TRUE}
 # Model structure assuming one intercept and slop for all regions
 model_structure <- " 
 model {
@@ -406,7 +411,7 @@ bugs_data <- list(
 params <- c("beta0", "beta1")
 
 # Run the model
-fit <- jags(
+regression_Q2 <- jags(
   data = bugs_data,
   parameters.to.save = params,
   model.file = "logistic_model_Q.2.bug",
@@ -416,25 +421,20 @@ fit <- jags(
   n.thin = 2
 )
 
-print(fit)
 ```
 
 \newpage
 
 # Question 3
-Run the MCMC method and check convergence of the MCMC chains.
-Give the details on how you checked convergence
+Run the MCMC method and check convergence of the MCMC chains. Give the details on how you checked convergence.
 
 ## Answer  
-Looking at the trace plots below, for both \(\beta_0\) and \(\beta_1\) we can see that the chains jump around the same general range and visit different areas of the parameter space. No drift is apparent. All chains seem to oscillate around a similar range of values. A visual check favours a good convergence of the model. 
+Looking at the trace plots below, for both \(\beta_0\) and \(\beta_1\) we can see that the chains jump around the same mean and visit different areas of the parameter space. No drift is apparent. All chains seem to oscillate within a similar range of values. A visual check favours a good convergence of the model. 
 We then present Gelman-Rubin diagnostic plots which compare the variance within each Markov chain to the variance between multiple chains. 
 
 ```{r Q3 trace plots, echo=FALSE, fig.cap="Trace plots for the logistic model in question 2. Each color represent a chain"}
-# Load the coda package
-library(coda)
-
 # Convert output to mcmc object
-mcmc_samples <- as.mcmc(fit)
+mcmc_samples <- as.mcmc(regression_Q2)
 
 # Plot trace plots
 traceplot(mcmc_samples[, c("beta0", "beta1")])
@@ -452,19 +452,84 @@ The plot reports on the \(y\) axis the variance between multiple chains and trac
 # Question 4
 Make a plot of the posterior densities and give summary measures of the posterior distributions of the model parameters. Interpret the results.
 
-```{r}
+## Answer
+The posterior density for \(\beta_0\) should captures the baseline vaccination coverage when year of birth is zero. Therefore, here it does not have a direct interpretation in terms of vaccination coverage, but it is still necessary for the model. Looking at \(\beta_1\)posterior density we see that is centered very close to 0, and its mass spans both positive and negative values. This means that the effect of year of birth is limited and there is high uncertainty regarding its estimate. Posterior summary measures for \(\beta_0\) and \(\beta_1\) are provided in table 3. If we then apply the inverse logit transformation to the linear predictor we can obtain the estimated vaccination coverage per year by using as \(\beta_0\) and \(\beta_1\) their mean. Data are reported in the table 4 below and indeed reflect an approximate vaccination around 90%. 
 
+```{r posterior density plots Q4, echo=FALSE, fig.cap="Posterior density plots for the logistic model in question 2"}
+# Convert the data from a list *(mcmc_samples) into a data frame with 
+# one row per draw and one column per parameter using the "posterior" package
+# needed for ggplot 
+df_samples <- as_draws_df(mcmc_samples)
+
+# Plot posterior densities
+post.density_beta0 <- ggplot(df_samples, aes(x = beta0)) +
+  geom_density(fill = "skyblue", alpha = 0.6) +
+  labs(title = "Posterior Density for beta0", x = "beta0")
+
+post.density_beta1 <- ggplot(df_samples, aes(x = beta1)) +
+  geom_density(fill = "salmon", alpha = 0.6) +
+  labs(title = "Posterior Density for beta1", x = "beta1")
+
+# Arrange the plots side by side
+grid.arrange(post.density_beta0, post.density_beta1, ncol = 2)
+```
+
+
+```{r Posterior summary measures Q4, echo=FALSE}
+# Getting the summary using the "posterior" package
+post_summary <- summarise_draws(df_samples)
+
+# Selecting columns of interest
+post_summary_select <- post_summary[, 1:7]
+
+# Rounding to the second decimal for the table
+post_summary_select <- post_summary_select %>%
+  mutate(across(where(is.numeric), ~ round(.x, 2)))
+
+post_summary_select %>%
+  knitr::kable(
+    format = "latex", 
+    booktabs = TRUE,
+    caption = "Posterior summary measures for baysan regression model in Q.2",
+    col.names = c("Parameter", "Mean", "Median", "SD", "Median Abs.Dev", 
+                  "5th Percentile", "95th Percentile"
+  )) %>%
+  kableExtra::kable_styling(latex_options = c("hold_position"))
 
 ```
+
+
+```{r Estimated vaccination coverage by year, echo=FALSE}
+mean_beta0 <- post_summary_select[1,]$mean
+mean_beta1 <- post_summary_select[2,]$mean
+years <- unique(vacc_data$Birth.Year)
+  
+coverage <- 1/(1+exp(-(mean_beta0+mean_beta1*years)))
+coverage_percent <- coverage * 100
+
+vaccination_coverage_by_year <- cbind(years, round(coverage_percent,3))
+
+vaccination_coverage_by_year %>%
+  knitr::kable(
+    format = "latex", 
+    booktabs = TRUE,
+    caption = "Vaccination coverage estimates per year based on model in Q2",
+    col.names = c("Coverage", "Year of birth")
+    ) %>%
+    kableExtra::kable_styling(latex_options = c("hold_position"))
+
+```
+
+\newpage
 
 # Question 5
 Give the posterior estimate of the vaccination coverage per birth year.
-Compare with the analytical results you obtained in Question 1.
+Compare with the analytically results you obtained in Question 1.
 
-```{r}
+## Answer
+Posterior estimate of the vaccination coverage per birth year were given in table 5.
 
-
-```
+\newpage
 
 # Question 6
 Secondly, investigate whether the vaccination coverage trends are distinct at the different locations by adding a location-specific intercept and slope:
@@ -476,8 +541,26 @@ $$
 Use data from the years 2011-2019. Assume non-informative priors for the parameters to be estimated. Write the code in BUGS language. Give a brief summary of the convergence checks you performed. Give the posterior estimates of this model.
 
 ```{r}
+model_structure <- "
+model {
+	for (i in 1:N_region) { # number of regions
+	for (j in 1:N_year) { # number of year cohorts
+	Y[i, j] ~ dbin(pi[i, j], N[i,j]) # likelihood for a given year j and region i
+	logit(pi[i,j])<- beta0[i] + beta1[i] * BirthYear[j] # regression function
+	}
+
+    # Non-informative priors for intercept and slope
+    beta0[i] ~ dnorm(0, 0.001)
+    beta1[i] ~ dnorm(0, 0.001)
+  }
+
+}
+"
+
 
 ```
+
+\newpage
 
 # Question 7
 What is the probability (a posteriori) that there is an increase in vaccination coverage (per location)?
@@ -487,6 +570,8 @@ What is the probability (a posteriori) that there is an increase in vaccination 
 
 ```
 
+\newpage
+
 # Question 8
 Make a plot of the estimated vaccination coverage (per location and birth year), including the uncertainty on the estimates. Include also the observed vaccination proportion in the plot.
 
@@ -494,6 +579,8 @@ Make a plot of the estimated vaccination coverage (per location and birth year),
 
 
 ```
+
+\newpage
 
 # Question 9
 Investigate whether the observed number of vaccinated children in 2020 is in line with the expectations from earlier years. For this, compare the observed number of vaccinated children in 2020 with the prediction intervals for number of vaccinated children in 2020.
@@ -503,6 +590,8 @@ Investigate whether the observed number of vaccinated children in 2020 is in lin
 
 ```
 
+
+\newpage
 
 # Question 10
 Make pairwise comparisons of the vaccination coverage in 2019 by estimating the ratio of the vaccination coverage in 2019 in two locations.
