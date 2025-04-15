@@ -146,16 +146,16 @@ calculate_posterior <- function(vaccinated, sample_size, alpha_prior, beta_prior
   )
 }
 
-posterior_SM_B.10.20 <- calculate_posterior(vacc_data$Vaccinated, vacc_data$Sample.Size, alpha_prior=alpha_prior, beta_prior=beta_prior)
+posterior_SM_B.1.1 <- calculate_posterior(vacc_data$Vaccinated, vacc_data$Sample.Size, alpha_prior=alpha_prior, beta_prior=beta_prior)
 ```
 
 \newpage
 ```{r Q1.1 table, echo=FALSE}
 # Combine the two tables to have Geography and Birth.Year
-post.summary.B.10.20 <- cbind(vacc_data, posterior_SM_B.10.20)
+posterior_SM_B.1.1 <- cbind(vacc_data, posterior_SM_B.1.1)
 
 # Select wanted variables
-post.summary.B.10.20_selected <- post.summary.B.10.20 %>%
+post.summary.B.1.1_selected <- posterior_SM_B.1.1 %>%
   select(
   "Geography",
   "Birth.Year",
@@ -165,7 +165,7 @@ post.summary.B.10.20_selected <- post.summary.B.10.20 %>%
 )
 
 # Put them into a table
-post.summary.B.10.20_selected %>%
+post.summary.B.1.1_selected %>%
   knitr::kable(
     format = "latex", 
     booktabs = TRUE,
@@ -176,7 +176,6 @@ post.summary.B.10.20_selected %>%
 
 \newpage
 ```{r Q1.1 posterior plots, echo=FALSE, fig.cap="Posterior densities by region and year assuming an uninformative prior."}
-
 # Function to generate the posterior densities
 posterior_densities <- function(alpha_post, beta_post, region, year) {
   # Create a theta sequence for plotting
@@ -216,10 +215,10 @@ posterior_densities <- function(alpha_post, beta_post, region, year) {
 
 # Generate density data using the function above
 density_data <- posterior_densities(
-  post.summary.B.10.20$alpha_posterior,
-  post.summary.B.10.20$beta_posterior,
-  post.summary.B.10.20$Geography,
-  post.summary.B.10.20$Birth.Year
+  posterior_SM_B.1.1$alpha_posterior,
+  posterior_SM_B.1.1$beta_posterior,
+  posterior_SM_B.1.1$Geography,
+  posterior_SM_B.1.1$Birth.Year
 )
 
 # Plot the posterior densities wrapped by year
@@ -310,10 +309,11 @@ with
 $$
 \text{logit}(\pi_{ij}) = \beta_{0i} + \beta_{1i} \cdot \text{BirthYear}_j
 $$
-where
 $$
 \text{logit}(\pi_{ij}) = \log\left(\frac{\pi_{ij}}{1 - \pi_{ij}}\right)
 $$
+where:
+
 - \(i\) is the location,
 
 - \(j\) is birth cohort,
@@ -483,17 +483,17 @@ post_summary <- summarise_draws(df_samples)
 post_summary_select <- post_summary[, 1:7]
 
 # Rounding to the second decimal for the table
-post_summary_select <- post_summary_select %>%
-  mutate(across(where(is.numeric), ~ round(.x, 2)))
+post_summary_select_rounded <- post_summary_select %>%
+  mutate(across(where(is.numeric), ~ round(.x, 4)))
 
-post_summary_select %>%
+post_summary_select_rounded %>%
   knitr::kable(
     format = "latex", 
     booktabs = TRUE,
     caption = "Posterior summary measures for baysan regression model in Q.2",
     col.names = c("Parameter", "Mean", "Median", "SD", "Median Abs.Dev", 
                   "5th Percentile", "95th Percentile"
-  )) %>%
+    )) %>%
   kableExtra::kable_styling(latex_options = c("hold_position"))
 
 ```
@@ -503,11 +503,11 @@ post_summary_select %>%
 mean_beta0 <- post_summary_select[1,]$mean
 mean_beta1 <- post_summary_select[2,]$mean
 years <- unique(vacc_data$Birth.Year)
-  
-coverage <- 1/(1+exp(-(mean_beta0+mean_beta1*years)))
+
+coverage <- 1/(1+exp(-(mean_beta0+(mean_beta1*years))))
 coverage_percent <- coverage * 100
 
-vaccination_coverage_by_year <- cbind(years, round(coverage_percent,3))
+vaccination_coverage_by_year <- cbind(years, round(coverage_percent,2))
 
 vaccination_coverage_by_year %>%
   knitr::kable(
@@ -515,9 +515,8 @@ vaccination_coverage_by_year %>%
     booktabs = TRUE,
     caption = "Vaccination coverage estimates per year based on model in Q2",
     col.names = c("Coverage", "Year of birth")
-    ) %>%
-    kableExtra::kable_styling(latex_options = c("hold_position"))
-
+  ) %>%
+  kableExtra::kable_styling(latex_options = c("hold_position"))
 ```
 
 \newpage
@@ -527,7 +526,33 @@ Give the posterior estimate of the vaccination coverage per birth year.
 Compare with the analytically results you obtained in Question 1.
 
 ## Answer
-Posterior estimate of the vaccination coverage per birth year were given in table 5.
+Posterior estimate of the vaccination coverage per birth year calculated in question 1 assuming a non informative prior are reported below side by side with those estimated in question 4. Since in question 1 we actually had the break-down of the coverage per year and per region we averaged the yearly data over the three regions for an easier comparison. The differences are small and mostly limited to approximately one percentage point.
+
+```{r Estimated vaccination coverage by year comparison Q1 and Q5, echo=FALSE}
+
+# Group by year and calculate the average
+mean.coverage.Q1 <- post.summary.B.1.1_selected %>%
+  group_by(Birth.Year) %>%
+  summarise(mean_coverage_Q1 = mean(posterior_mean, na.rm = TRUE))
+
+mean.coverage.Q1$mean_coverage_Q1 <- round(100*mean.coverage.Q1$mean_coverage_Q1,2)
+
+mean.coverage.Q5 <- as.data.frame(vaccination_coverage_by_year)
+
+difference <- mean.coverage.Q1$mean_coverage_Q1-mean.coverage.Q5$V2
+
+comparison <- cbind(mean.coverage.Q1, mean.coverage.Q5$V2, difference)
+
+comparison %>%
+  knitr::kable(
+    format = "latex", 
+    booktabs = TRUE,
+    caption = "Vaccination coverage estimates per year based on model in Q1 and Q5",
+    col.names = c("Yea of birth", "estimate from Q1", "estimate from Q5", "difference (Q1-Q5)")
+  ) %>%
+  kableExtra::kable_styling(latex_options = c("hold_position"))
+```
+
 
 \newpage
 
