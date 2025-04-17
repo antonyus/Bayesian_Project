@@ -47,11 +47,12 @@ The next table summarizes, based on a survey, the number of children that had at
 ```{r data table, echo=FALSE}
 vacc_data %>%
   knitr::kable(
-    format = "latex", 
+    format = "html", 
     booktabs = TRUE,
     caption = "Vaccination Data"
   ) %>%
   kableExtra::kable_styling(latex_options = c("hold_position"))
+
 ```
 
 \newpage 
