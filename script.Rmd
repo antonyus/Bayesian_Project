@@ -47,12 +47,11 @@ The next table summarizes, based on a survey, the number of children that had at
 ```{r data table, echo=FALSE}
 vacc_data %>%
   knitr::kable(
-    format = "html", 
+    format = "latex", 
     booktabs = TRUE,
     caption = "Vaccination Data"
   ) %>%
   kableExtra::kable_styling(latex_options = c("hold_position"))
-
 ```
 
 \newpage 
@@ -489,7 +488,7 @@ post_summary_select_rounded <- post_summary_select %>%
 
 post_summary_select_rounded %>%
   knitr::kable(
-    format = "latex", 
+    format = "lat4ex", 
     booktabs = TRUE,
     caption = "Posterior summary measures for baysan regression model in Q.2",
     col.names = c("Parameter", "Mean", "Median", "SD", "Median Abs.Dev", 
@@ -569,20 +568,48 @@ Use data from the years 2011-2019. Assume non-informative priors for the paramet
 ```{r}
 model_structure <- "
 model {
-	for (i in 1:N_region) { # number of regions
-	for (j in 1:N_year) { # number of year cohorts
-	Y[i, j] ~ dbin(pi[i, j], N[i,j]) # likelihood for a given year j and region i
-	logit(pi[i,j])<- beta0[i] + beta1[i] * BirthYear[j] # regression function
-	}
+  for (i in 1:N_region) { # number of regions
+    for (j in 1:N_year) { # number of year cohorts
+      Y[i, j] ~ dbin(pi[i, j], N[i,j]) # likelihood
+      logit(pi[i,j]) <- beta0[i] + beta1[i] * BirthYear[j] # regression
+    }
 
-    # Non-informative priors for intercept and slope
+    # Non-informative priors
     beta0[i] ~ dnorm(0, 0.001)
     beta1[i] ~ dnorm(0, 0.001)
   }
-
 }
 "
 
+
+writeLines(model_structure, "logistic_model_Q6.bug")
+
+# Filter for 2011–2019
+vacc_data_q6 <- vacc_data %>% filter(Birth.Year >= 2011 & Birth.Year <= 2019)
+
+# Build Y and N matrices
+Y <- matrix(vacc_data_q6$Vaccinated, nrow = length(unique(vacc_data_q6$Geography)), byrow = TRUE)
+N <- matrix(vacc_data_q6$Sample.Size, nrow = length(unique(vacc_data_q6$Geography)), byrow = TRUE)
+
+bugs_data_q6 <- list(
+  Y = Y,
+  N = N,
+  BirthYear = as.numeric(as.factor(vacc_data_q6$Birth.Year)),
+  N_region = length(unique(vacc_data_q6$Geography)),
+  N_year = length(unique(vacc_data_q6$Birth.Year))
+)
+
+params_q6 <- c("beta0", "beta1")
+
+regression_Q6 <- jags(
+  data = bugs_data_q6,
+  parameters.to.save = params_q6,
+  model.file = "logistic_model_Q6.bug",
+  n.chains = 3,
+  n.iter = 5000,
+  n.burnin = 500,
+  n.thin = 2
+)
 
 ```
 
@@ -593,6 +620,38 @@ What is the probability (a posteriori) that there is an increase in vaccination 
 
 ```{r}
 
+# Extract MCMC samples from the model
+mcmc_samples_Q6 <- as.mcmc(regression_Q6)
+
+# Combine chains into one matrix
+samples_matrix <- do.call(rbind, mcmc_samples_Q6)
+
+# Get all beta1[i] columns (i.e., slopes per location)
+beta1_columns <- grep("^beta1\\[", colnames(samples_matrix))
+beta1_samples <- samples_matrix[, beta1_columns]
+
+# Compute posterior probability that each slope is > 0
+posterior_probs <- apply(beta1_samples, 2, function(x) mean(x > 0))
+
+# Get region names
+region_names <- unique(vacc_data_q6$Geography)
+
+# Create summary dataframe
+posterior_prob_df <- data.frame(
+  Region = region_names,
+  Posterior_Prob_Increase = round(posterior_probs, 4)
+)
+
+# Display table
+posterior_prob_df %>%
+  knitr::kable(
+    format = "latex",
+    booktabs = TRUE,
+    caption = "Posterior probability of increase in vaccination coverage per region"
+  ) %>%
+  kableExtra::kable_styling(latex_options = c("hold_position"))
+
+
 
 ```
 
@@ -601,17 +660,155 @@ What is the probability (a posteriori) that there is an increase in vaccination 
 # Question 8
 Make a plot of the estimated vaccination coverage (per location and birth year), including the uncertainty on the estimates. Include also the observed vaccination proportion in the plot.
 
-```{r}
+```{r Prepare prediction grid echo=FALSE}
+
+# Prepare unique regions and years from your filtered data
+regions <- unique(vacc_data_q6$Geography)
+years <- sort(unique(vacc_data_q6$Birth.Year))
+year_index <- as.numeric(as.factor(years))  # used for predictions
+
+# Set up grid of region-year combinations
+pred_grid <- expand.grid(
+  Region = regions,
+  Year = years
+)
+
+```
+
+```{r Extract posterior samples and compute predicted coverage echo=FALSE}
+
+# Extract beta0[i] and beta1[i] posterior samples
+samples_matrix <- do.call(rbind, as.mcmc(regression_Q6))
+beta0_samples <- samples_matrix[, grep("^beta0\\[", colnames(samples_matrix))]
+beta1_samples <- samples_matrix[, grep("^beta1\\[", colnames(samples_matrix))]
+
+# Initialize result dataframe
+posterior_summary <- data.frame()
+
+# Loop through region-year combinations
+for (i in seq_along(regions)) {
+  for (j in seq_along(year_index)) {
+    # Compute predicted coverage for each sample
+    linear_pred <- beta0_samples[, i] + beta1_samples[, i] * year_index[j]
+    pred_coverage <- 1 / (1 + exp(-linear_pred))
+
+    # Summarize predictions
+    mean_est <- mean(pred_coverage)
+    lower_95 <- quantile(pred_coverage, 0.025)
+    upper_95 <- quantile(pred_coverage, 0.975)
+
+    # Append results
+    posterior_summary <- rbind(posterior_summary, data.frame(
+      Region = regions[i],
+      Year = years[j],
+      Mean = mean_est,
+      Lower = lower_95,
+      Upper = upper_95
+    ))
+  }
+}
 
 
 ```
 
+```{r Merge with observed data echo=FALSE}
+
+# Calculate observed vaccination proportion
+observed <- vacc_data_q6 %>%
+  group_by(Geography, Birth.Year) %>%
+  summarise(Observed = sum(Vaccinated) / sum(Sample.Size)) %>%
+  rename(Region = Geography, Year = Birth.Year)
+
+# Merge with posterior summary
+plot_data <- left_join(posterior_summary, observed, by = c("Region", "Year"))
+
+```
+
+```{r Plot echo=FALSE}
+
+ggplot(plot_data, aes(x = Year, y = Mean, color = Region, fill = Region)) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(ymin = Lower, ymax = Upper), alpha = 0.2, linetype = "dashed") +
+  geom_point(aes(y = Observed), shape = 21, fill = "white", size = 2, stroke = 1.2) +
+  facet_wrap(~ Region) +
+  labs(
+    title = "Vaccination Coverage by Region and Year",
+    y = "Vaccination Coverage (Estimated with 95% CI)",
+    x = "Birth Year"
+  ) +
+  theme_minimal()
+
+
+```
 \newpage
 
 # Question 9
 Investigate whether the observed number of vaccinated children in 2020 is in line with the expectations from earlier years. For this, compare the observed number of vaccinated children in 2020 with the prediction intervals for number of vaccinated children in 2020.
 
-```{r}
+```{r Filter observed 2020 data echo=FALSE}
+
+# Filter vaccination data for 2020
+vacc_data_2020 <- vacc_data %>% filter(Birth.Year == 2020)
+
+# Order regions to match model output
+regions <- unique(vacc_data_q6$Geography)
+vacc_data_2020 <- vacc_data_2020 %>%
+  mutate(RegionIndex = match(Geography, regions))
+
+```
+
+```{r Predict number of vaccinated children usinf posterior draws echo=FALSE}
+
+# Get posterior samples
+samples_matrix <- do.call(rbind, as.mcmc(regression_Q6))
+beta0_samples <- samples_matrix[, grep("^beta0\\[", colnames(samples_matrix))]
+beta1_samples <- samples_matrix[, grep("^beta1\\[", colnames(samples_matrix))]
+
+# Initialize storage
+predicted_counts <- list()
+
+# Loop over regions
+for (i in seq_along(regions)) {
+  N_i <- vacc_data_2020$Sample.Size[vacc_data_2020$RegionIndex == i]
+
+  # Predict logit and convert to pi
+  logit_pi <- beta0_samples[, i] + beta1_samples[, i] * length(unique(vacc_data_q6$Birth.Year)) + 1  # 2020 index (after 2011–2019)
+  pi <- 1 / (1 + exp(-logit_pi))
+
+  # Simulate binomial predictions
+  vaccinated_draws <- rbinom(length(pi), size = N_i, prob = pi)
+  predicted_counts[[i]] <- vaccinated_draws
+}
+
+
+```
+
+```{r Summary table with preedictional intervals and onserved counts echo=FALSE}
+
+# Build results
+results_q9 <- data.frame()
+
+for (i in seq_along(regions)) {
+  draws <- predicted_counts[[i]]
+  observed <- vacc_data_2020$Vaccinated[vacc_data_2020$RegionIndex == i]
+
+  results_q9 <- rbind(results_q9, data.frame(
+    Region = regions[i],
+    Observed = observed,
+    Pred_Mean = mean(draws),
+    Pred_Lower = quantile(draws, 0.025),
+    Pred_Upper = quantile(draws, 0.975)
+  ))
+}
+
+# Display results
+results_q9 %>%
+  knitr::kable(
+    format = "latex",
+    booktabs = TRUE,
+    caption = "Prediction intervals vs. observed number of vaccinated children in 2020"
+  ) %>%
+  kableExtra::kable_styling(latex_options = c("hold_position"))
 
 
 ```
@@ -623,7 +820,78 @@ Investigate whether the observed number of vaccinated children in 2020 is in lin
 Make pairwise comparisons of the vaccination coverage in 2019 by estimating the ratio of the vaccination coverage in 2019 in two locations.
 Interpret the results.
 
-```{r}
+```{r Pairwise Comparison  echo=FALSE}
 
+# Prepare
+region_names <- unique(vacc_data_q6$Geography)
+num_regions <- length(region_names)
+index_2019 <- length(unique(vacc_data_q6$Birth.Year))  # index for 2019
+
+# Get Posterior samples
+samples_matrix <- do.call(rbind, as.mcmc(regression_Q6))
+beta0_samples <- samples_matrix[, grep("^beta0\\[", colnames(samples_matrix))]
+beta1_samples <- samples_matrix[, grep("^beta1\\[", colnames(samples_matrix))]
+
+# Storage for all pairwise ratio results
+all_ratios_df <- data.frame()
+
+# Loop through all unique pairs
+for (i in 1:(num_regions - 1)) {
+  for (j in (i + 1):num_regions) {
+    
+    # Predicted coverage for both regions in 2019
+    logit_A <- beta0_samples[, i] + beta1_samples[, i] * index_2019
+    logit_B <- beta0_samples[, j] + beta1_samples[, j] * index_2019
+
+    pi_A <- 1 / (1 + exp(-logit_A))
+    pi_B <- 1 / (1 + exp(-logit_B))
+
+    # Ratio of coverage A to B
+    ratio_samples <- pi_A / pi_B
+
+    # Add to results
+    all_ratios_df <- rbind(all_ratios_df, data.frame(
+      Region_A = region_names[i],
+      Region_B = region_names[j],
+      Mean_Ratio = round(mean(ratio_samples), 3),
+      Lower_95 = round(quantile(ratio_samples, 0.025), 3),
+      Upper_95 = round(quantile(ratio_samples, 0.975), 3)
+    ))
+  }
+}
+
+```
+
+```{r Table  echo=FALSE}
+
+all_ratios_df %>%
+  knitr::kable(
+    format = "html",
+    booktabs = TRUE,
+    caption = "Pairwise comparisons of vaccination coverage ratios in 2019"
+  ) %>%
+  kableExtra::kable_styling(latex_options = c("hold_position"))
+
+
+```
+
+```{r Plotting Pairwise Ratios with 95% Credible Intervals echo=FALSE}
+
+# Labels for each comparison
+all_ratios_df$Comparison <- paste0(all_ratios_df$Region_A, " / ", all_ratios_df$Region_B)
+
+# Plot
+ggplot(all_ratios_df, aes(x = reorder(Comparison, -Mean_Ratio), y = Mean_Ratio)) +
+  geom_point(size = 3, color = "#007C8A") +
+  geom_errorbar(aes(ymin = Lower_95, ymax = Upper_95), width = 0.2, color = "#007C8A") +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "gray40") +
+  labs(
+    title = "Pairwise Coverage Ratios in 2019",
+    subtitle = "Mean with 95% credible intervals (Region A / Region B)",
+    x = "Region Comparison",
+    y = "Coverage Ratio"
+  ) +
+  coord_flip() +
+  theme_minimal(base_size = 12)
 
 ```
