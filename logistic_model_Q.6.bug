@@ -1,4 +1,5 @@
- model {
+
+model {
 	for (i in 1:N_region) { # number of regions
 	for (j in 1:N_year) { # number of year cohorts
 	Y[i, j] ~ dbin(pi[i, j], N[i,j]) # likelihood for a given year j and region i
@@ -11,3 +12,4 @@
   }
 
 }
+
