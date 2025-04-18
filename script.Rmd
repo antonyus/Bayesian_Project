@@ -602,7 +602,7 @@ This hierarchical model structure allows each region to have its own baseline co
 We implemented this model in **JAGS** using three MCMC chains with 5000 iterations, a burn-in of 500, and thinning of 2. Convergence was assessed using **trace plots** and **Gelman-Rubin diagnostics**, confirming good mixing and \( \hat{R} \approx 1 \) for all parameters.
 
 
-```{r Model Structure}
+```{r Model Structure, results='hide'}
 model_structure <- "
 model {
   for (i in 1:N_region) { # number of regions
@@ -719,7 +719,6 @@ What is the probability (a posteriori) that there is an increase in vaccination 
 ## Answer
 
 ```{r Q7-posterior-probs, echo=FALSE, message=FALSE, warning=FALSE}
-
 # Combine MCMC chains into a matrix
 samples_matrix <- do.call(rbind, as.mcmc(regression_Q6))
 
@@ -748,7 +747,6 @@ posterior_prob_df %>%
     col.names = c("Region", "Posterior Probability of Increase")
   ) %>%
   kableExtra::kable_styling(latex_options = c("hold_position"))
-
 ```
 
 ## Interpretation
@@ -764,7 +762,6 @@ Make a plot of the estimated vaccination coverage (per location and birth year),
 ## Answer
 
 ```{r Prepare prediction grid, echo=FALSE}
-
 # Prepare unique regions and years from your filtered data
 regions <- unique(vacc_data_q6$Geography)
 years <- sort(unique(vacc_data_q6$Birth.Year))
@@ -779,7 +776,6 @@ pred_grid <- expand.grid(
 ```
 
 ```{r Extract posterior samples and compute predicted coverage, echo=FALSE}
-
 # Extract beta0[i] and beta1[i] posterior samples
 samples_matrix <- do.call(rbind, as.mcmc(regression_Q6))
 beta0_samples <- samples_matrix[, grep("^beta0\\[", colnames(samples_matrix))]
@@ -811,11 +807,9 @@ for (i in seq_along(regions)) {
   }
 }
 
-
 ```
 
 ```{r Merge with observed data, echo=FALSE}
-
 # Calculate observed vaccination proportion
 observed <- vacc_data_q6 %>%
   group_by(Geography, Birth.Year) %>%
@@ -824,27 +818,130 @@ observed <- vacc_data_q6 %>%
 
 # Merge with posterior summary
 plot_data <- left_join(posterior_summary, observed, by = c("Region", "Year"))
-
 ```
 
 The following plot shows the estimated vaccination coverage by region and birth year, along with 95% credible intervals for the model estimates. The shaded regions represent uncertainty around the predicted coverage, while observed vaccination proportions are overlaid as white points with outlines. If observed data points fall within the shaded bands, this indicates that the model fits the data well. Differences in slope and uncertainty width across regions reflect regional variation in trends and data size.
 
-```{r Plot, echo=FALSE}
-
+```{r Plot, echo=FALSE, fig.cap="Estimated vaccination coverage by region and birth year and observed data (dots). "}
 ggplot(plot_data, aes(x = Year, y = Mean, color = Region, fill = Region)) +
   geom_line(size = 1) +
   geom_ribbon(aes(ymin = Lower, ymax = Upper), alpha = 0.2, linetype = "dashed") +
   geom_point(aes(y = Observed), shape = 21, fill = "white", size = 2, stroke = 1.2) +
   facet_wrap(~ Region) +
+  scale_x_continuous(breaks = seq(min(plot_data$Year), max(plot_data$Year), by = 1)) +  # Interval every 1 years
   labs(
     title = "Vaccination Coverage by Region and Year",
     y = "Vaccination Coverage (Estimated with 95% CI)",
     x = "Birth Year"
   ) +
-  theme_minimal()
-
-
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 ```
+
+```markdown
+I think there is something strange in this plot because the expected coverage 
+(mean) is lower than in the previews table and much lower than th observations 
+which makes it strange since we used a vague prior right? mm...no I tried and I 
+get the same results. I was not expecting such a low mean for mississippi 
+actually. And also isent the cred interval unexpectedly wide?
+```
+
+```{r alternative plot, echo=FALSE}
+observed_coverage <- vacc_data_q6 %>%
+  group_by(Geography, Birth.Year) %>%
+  summarise(Observed = sum(Vaccinated) / sum(Sample.Size)) %>%
+  rename(Region = Geography, Year = Birth.Year)
+
+predicted_coverage <- posterior_pi
+predicted_coverage$Estimated_Coverage_Percent <- predicted_coverage$Estimated_Coverage_Percent / 100
+
+merged_data <- left_join((observed_coverage), predicted_coverage, by = c("Region", "Year"))
+
+samples_matrix <- regression_Q6$BUGSoutput$sims.list
+n_iter <- dim(samples_matrix$beta0)[1]       # e.g. 6750 iterations
+n_regions <- length(region_levels)           # e.g. 3
+n_years <- length(year_levels)               # e.g. 9
+
+estimated_pi_array <- array(NA, dim = c(n_iter, n_regions, n_years))
+
+for (iter in 1:n_iter) {
+  for (i in 1:n_regions) {
+    for (j in 1:n_years) {
+      eta <- samples_matrix$beta0[iter, i] + samples_matrix$beta1[iter, i] * year_index[j]
+      estimated_pi_array[iter, i, j] <- 1 / (1 + exp(-eta))  # inverse logit
+    }
+  }
+}
+
+credible_interval <- map_dfr(1:n_regions, function(i) {
+  map_dfr(1:n_years, function(j) {
+    sims <- estimated_pi_array[, i, j]
+    tibble(
+      Region = region_levels[i],
+      Year = year_levels[j],
+      Mean = mean(sims),
+      Lower = quantile(sims, 0.025),
+      Upper = quantile(sims, 0.975)
+    )
+  })
+})
+
+merged_data_full <- left_join(merged_data, credible_interval, by = c("Region", "Year"))
+
+
+# Create a version of the dataset with an indicator for predicted points
+predicted_points <- merged_data_full %>%
+  mutate(PointType = "Predicted")
+
+# Create a version with observed points (plotted as separate layer)
+observed_points <- merged_data_full %>%
+  mutate(PointType = "Observed",
+         Estimated_Coverage_Percent = Observed)
+
+# Combine both for plotting points
+points_combined <- bind_rows(predicted_points, observed_points)
+
+# Final ggplot
+ggplot() +
+  # Credible interval ribbon
+  geom_ribbon(data = predicted_points,
+              aes(x = Year, ymin = Lower, ymax = Upper, fill = Region),
+              alpha = 0.2) +
+  
+  # Points for predicted and observed values
+  geom_point(data = points_combined,
+             aes(x = Year, y = Estimated_Coverage_Percent, color = Region, shape = PointType),
+             size = 2, stroke = 1.2, fill = "white") +
+  
+  # Facet by Region
+  facet_wrap(~ Region) +
+  
+  # Axis breaks
+  scale_x_continuous(breaks = seq(min(merged_data_full$Year), max(merged_data_full$Year), by = 1)) +
+  
+  # Manual shape legend
+  scale_shape_manual(
+    name = "Point Type",
+    values = c("Predicted" = 17, "Observed" = 21)
+  ) +
+  
+  # Optional: customize colors (you can choose your own palette)
+  scale_color_brewer(palette = "Dark2", name = "Region") +
+  scale_fill_brewer(palette = "Pastel2", name = "Region") +
+  
+  # Labels and theme
+  labs(
+    title = "Vaccination Coverage by Region and Year: Predicted vs Observed",
+    y = "Vaccination Coverage (%)",
+    x = "Birth Year"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    legend.position = "right"
+  )
+```
+
 \newpage
 
 # Question 9
@@ -865,7 +962,7 @@ vacc_data_2020 <- vacc_data_2020 %>%
 
 ```
 
-```{r Predict number of vaccinated children usinf posterior draws, echo=FALSE}
+```{r Predict number of vaccinated children using posterior draws, echo=FALSE}
 
 # Get posterior samples
 samples_matrix <- do.call(rbind, as.mcmc(regression_Q6))
@@ -909,6 +1006,7 @@ for (i in seq_along(regions)) {
   ))
 }
 
+
 # Display results
 results_q9 %>%
   knitr::kable(
@@ -920,6 +1018,15 @@ results_q9 %>%
 
 
 ```
+
+```markdown
+
+Sorry what does Pred_Mean stands for here? The predicted vacc cover for 2020 
+taking the mean beta for region and year effect from the samples?
+
+```
+
+
 \newpage
 
 # Question 10
