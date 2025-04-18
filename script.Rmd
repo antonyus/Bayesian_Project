@@ -488,7 +488,7 @@ post_summary_select_rounded <- post_summary_select %>%
 
 post_summary_select_rounded %>%
   knitr::kable(
-    format = "lat4ex", 
+    format = "latex", 
     booktabs = TRUE,
     caption = "Posterior summary measures for baysan regression model in Q.2",
     col.names = c("Parameter", "Mean", "Median", "SD", "Median Abs.Dev", 
@@ -565,42 +565,93 @@ $$
 
 Use data from the years 2011-2019. Assume non-informative priors for the parameters to be estimated. Write the code in BUGS language. Give a brief summary of the convergence checks you performed. Give the posterior estimates of this model.
 
-```{r}
+## Answer  
+
+To evaluate whether trends in vaccination coverage differ across regions, we use a hierarchical logistic regression model. The number of vaccinated children in each region and birth year is assumed to follow a Binomial distribution with region-specific probabilities.
+
+$$
+\begin{aligned}
+&Y_{ij} \sim \text{Binomial}(\pi_{ij}, N_{ij}) \\\\
+&\text{logit}(\pi_{ij}) = \beta_{0i} + \beta_{1i} \cdot \text{BirthYear}_j \\\\
+&\text{logit}(\pi_{ij}) = \log\left( \frac{\pi_{ij}}{1 - \pi_{ij}} \right)
+\end{aligned}
+$$
+
+Where:
+
+- \( Y_{ij} \) is the number of vaccinated children in region \( i \) and year \( j \),
+- \( N_{ij} \) is the number of children surveyed in region \( i \) and year \( j \),
+- \( \pi_{ij} \) is the probability of being vaccinated,
+- \( \beta_{0i} \) is the region-specific intercept, capturing baseline coverage,
+- \( \beta_{1i} \) is the region-specific slope, capturing the change in coverage over time.
+
+To reflect minimal prior knowledge, we use vague, non-informative priors for the intercepts and slopes:
+
+$$
+\begin{aligned}
+\beta_{0i} &\sim \text{Normal}(0, 0.001) \\\\
+\beta_{1i} &\sim \text{Normal}(0, 0.001)
+\end{aligned}
+$$
+
+This hierarchical model structure allows each region to have its own baseline coverage and trend while still sharing the same model form.
+
+We implemented this model in **JAGS** using three MCMC chains with 5000 iterations, a burn-in of 500, and thinning of 2. Convergence was assessed using **trace plots** and **Gelman-Rubin diagnostics**, confirming good mixing and \( \hat{R} \approx 1 \) for all parameters.
+
+
+```{r Model Structure}
 model_structure <- "
 model {
   for (i in 1:N_region) { # number of regions
     for (j in 1:N_year) { # number of year cohorts
-      Y[i, j] ~ dbin(pi[i, j], N[i,j]) # likelihood
-      logit(pi[i,j]) <- beta0[i] + beta1[i] * BirthYear[j] # regression
+      Y[i, j] ~ dbin(pi[i, j], N[i, j]) # likelihood
+      logit(pi[i, j]) <- beta0[i] + beta1[i] * BirthYear[j] # regression
     }
 
-    # Non-informative priors
     beta0[i] ~ dnorm(0, 0.001)
     beta1[i] ~ dnorm(0, 0.001)
   }
 }
 "
+```
 
-
+```{r Model Implementation in JAGS, echo=FALSE, message=FALSE, warning=FALSE}
 writeLines(model_structure, "logistic_model_Q6.bug")
 
-# Filter for 2011–2019
-vacc_data_q6 <- vacc_data %>% filter(Birth.Year >= 2011 & Birth.Year <= 2019)
+# Filter and arrange data
+vacc_data_q6 <- vacc_data %>%
+  filter(Birth.Year >= 2011 & Birth.Year <= 2019) %>%
+  arrange(Geography, Birth.Year)
 
-# Build Y and N matrices
-Y <- matrix(vacc_data_q6$Vaccinated, nrow = length(unique(vacc_data_q6$Geography)), byrow = TRUE)
-N <- matrix(vacc_data_q6$Sample.Size, nrow = length(unique(vacc_data_q6$Geography)), byrow = TRUE)
+# Define region and year levels
+region_levels <- unique(vacc_data_q6$Geography)
+year_levels <- sort(unique(vacc_data_q6$Birth.Year))
 
+# Pivot Vaccinated and Sample Size into matrices with consistent indexing
+vacc_matrix <- vacc_data_q6 %>%
+  select(Geography, Birth.Year, Vaccinated, Sample.Size) %>%
+  tidyr::pivot_wider(
+    names_from = Birth.Year,
+    values_from = c(Vaccinated, Sample.Size)
+  ) %>%
+  arrange(match(Geography, region_levels))
+
+# Extract matrices
+Y <- as.matrix(vacc_matrix %>% select(starts_with("Vaccinated_")))
+N <- as.matrix(vacc_matrix %>% select(starts_with("Sample.Size_")))
+
+# Prepare data for JAGS
 bugs_data_q6 <- list(
   Y = Y,
   N = N,
-  BirthYear = as.numeric(as.factor(vacc_data_q6$Birth.Year)),
-  N_region = length(unique(vacc_data_q6$Geography)),
-  N_year = length(unique(vacc_data_q6$Birth.Year))
+  BirthYear = year_levels,
+  N_region = length(region_levels),
+  N_year = length(year_levels)
 )
 
 params_q6 <- c("beta0", "beta1")
 
+# Run JAGS
 regression_Q6 <- jags(
   data = bugs_data_q6,
   parameters.to.save = params_q6,
@@ -613,54 +664,103 @@ regression_Q6 <- jags(
 
 ```
 
+```{r Q6-posterior-coverage, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+# Extract posterior summaries
+summary_Q6_clean <- as.data.frame(regression_Q6$BUGSoutput$summary)
+summary_Q6_clean$variable <- rownames(summary_Q6_clean)
+
+# Extract posterior means
+beta0_means <- summary_Q6_clean %>%
+  filter(grepl("^beta0\\[", variable)) %>%
+  pull(mean)
+
+beta1_means <- summary_Q6_clean %>%
+  filter(grepl("^beta1\\[", variable)) %>%
+  pull(mean)
+
+# Safe inverse logit
+inv_logit <- function(x) 1 / (1 + exp(-x))
+
+# Create posterior estimates grid
+posterior_pi <- expand.grid(
+  Region = region_levels,
+  Year = year_levels,
+  KEEP.OUT.ATTRS = FALSE
+) %>%
+  mutate(Region_Index = match(Region, region_levels)) %>%
+  rowwise() %>%
+  mutate(
+    eta = beta0_means[Region_Index] + beta1_means[Region_Index] * Year,
+    Estimated_Coverage_Percent = round(100 * inv_logit(eta), 2)
+  ) %>%
+  ungroup() %>%
+  select(Region, Year, Estimated_Coverage_Percent)
+
+
+# Table
+posterior_pi %>%
+  knitr::kable(
+    format = "latex",
+    booktabs = TRUE,
+    caption = "Posterior estimates of vaccination coverage (percent) by region and year",
+    col.names = c("Region", "Year", "Estimated Coverage (percent)")
+  ) %>%
+  kableExtra::kable_styling(latex_options = c("HOLD_position", "striped"))
+
+```
 \newpage
 
 # Question 7
 What is the probability (a posteriori) that there is an increase in vaccination coverage (per location)?
 
-```{r}
+## Answer
 
-# Extract MCMC samples from the model
-mcmc_samples_Q6 <- as.mcmc(regression_Q6)
+```{r Q7-posterior-probs, echo=FALSE, message=FALSE, warning=FALSE}
 
-# Combine chains into one matrix
-samples_matrix <- do.call(rbind, mcmc_samples_Q6)
+# Combine MCMC chains into a matrix
+samples_matrix <- do.call(rbind, as.mcmc(regression_Q6))
 
-# Get all beta1[i] columns (i.e., slopes per location)
-beta1_columns <- grep("^beta1\\[", colnames(samples_matrix))
-beta1_samples <- samples_matrix[, beta1_columns]
+# Extract beta1[i] samples (slope parameters per region)
+beta1_samples <- samples_matrix[, grep("^beta1\\[", colnames(samples_matrix))]
 
-# Compute posterior probability that each slope is > 0
+# Compute posterior probability P(beta1 > 0) for each region
 posterior_probs <- apply(beta1_samples, 2, function(x) mean(x > 0))
 
 # Get region names
 region_names <- unique(vacc_data_q6$Geography)
 
-# Create summary dataframe
+# Create summary data frame
 posterior_prob_df <- data.frame(
   Region = region_names,
-  Posterior_Prob_Increase = round(posterior_probs, 4)
-)
+  Posterior_Probability_of_Increase = round(posterior_probs, 4)
+) %>%
+  arrange(desc(Posterior_Probability_of_Increase))
 
-# Display table
+# Output table
 posterior_prob_df %>%
   knitr::kable(
     format = "latex",
     booktabs = TRUE,
-    caption = "Posterior probability of increase in vaccination coverage per region"
+    caption = "Posterior probability of increase in vaccination coverage per region",
+    col.names = c("Region", "Posterior Probability of Increase")
   ) %>%
   kableExtra::kable_styling(latex_options = c("hold_position"))
 
-
-
 ```
+
+## Interpretation
+
+The posterior probabilities represent the likelihood that vaccination coverage is increasing in each region, based on the posterior distribution of the slope \( \beta_{1i} \). A probability close to 1 suggests strong evidence of a positive trend over time, while values near 0.5 reflect uncertainty or no clear directional change. If a region exhibits a posterior probability above 0.95, it provides strong Bayesian evidence for an increase in vaccination coverage. On the other hand, probabilities near or below 0.5 may indicate stability or even a potential decline.
+
 
 \newpage
 
 # Question 8
 Make a plot of the estimated vaccination coverage (per location and birth year), including the uncertainty on the estimates. Include also the observed vaccination proportion in the plot.
 
-```{r Prepare prediction grid echo=FALSE}
+## Answer
+
+```{r Prepare prediction grid, echo=FALSE}
 
 # Prepare unique regions and years from your filtered data
 regions <- unique(vacc_data_q6$Geography)
@@ -675,7 +775,7 @@ pred_grid <- expand.grid(
 
 ```
 
-```{r Extract posterior samples and compute predicted coverage echo=FALSE}
+```{r Extract posterior samples and compute predicted coverage, echo=FALSE}
 
 # Extract beta0[i] and beta1[i] posterior samples
 samples_matrix <- do.call(rbind, as.mcmc(regression_Q6))
@@ -711,7 +811,7 @@ for (i in seq_along(regions)) {
 
 ```
 
-```{r Merge with observed data echo=FALSE}
+```{r Merge with observed data, echo=FALSE}
 
 # Calculate observed vaccination proportion
 observed <- vacc_data_q6 %>%
@@ -724,7 +824,9 @@ plot_data <- left_join(posterior_summary, observed, by = c("Region", "Year"))
 
 ```
 
-```{r Plot echo=FALSE}
+The following plot shows the estimated vaccination coverage by region and birth year, along with 95% credible intervals for the model estimates. The shaded regions represent uncertainty around the predicted coverage, while observed vaccination proportions are overlaid as white points with outlines. If observed data points fall within the shaded bands, this indicates that the model fits the data well. Differences in slope and uncertainty width across regions reflect regional variation in trends and data size.
+
+```{r Plot, echo=FALSE}
 
 ggplot(plot_data, aes(x = Year, y = Mean, color = Region, fill = Region)) +
   geom_line(size = 1) +
@@ -745,7 +847,10 @@ ggplot(plot_data, aes(x = Year, y = Mean, color = Region, fill = Region)) +
 # Question 9
 Investigate whether the observed number of vaccinated children in 2020 is in line with the expectations from earlier years. For this, compare the observed number of vaccinated children in 2020 with the prediction intervals for number of vaccinated children in 2020.
 
-```{r Filter observed 2020 data echo=FALSE}
+## Answer
+
+
+```{r Filter observed 2020 data, echo=FALSE}
 
 # Filter vaccination data for 2020
 vacc_data_2020 <- vacc_data %>% filter(Birth.Year == 2020)
@@ -757,7 +862,7 @@ vacc_data_2020 <- vacc_data_2020 %>%
 
 ```
 
-```{r Predict number of vaccinated children usinf posterior draws echo=FALSE}
+```{r Predict number of vaccinated children usinf posterior draws, echo=FALSE}
 
 # Get posterior samples
 samples_matrix <- do.call(rbind, as.mcmc(regression_Q6))
@@ -783,7 +888,7 @@ for (i in seq_along(regions)) {
 
 ```
 
-```{r Summary table with preedictional intervals and onserved counts echo=FALSE}
+```{r Summary table with preedictional intervals and onserved counts, echo=FALSE}
 
 # Build results
 results_q9 <- data.frame()
@@ -812,86 +917,91 @@ results_q9 %>%
 
 
 ```
-
-
 \newpage
 
 # Question 10
 Make pairwise comparisons of the vaccination coverage in 2019 by estimating the ratio of the vaccination coverage in 2019 in two locations.
 Interpret the results.
 
-```{r Pairwise Comparison  echo=FALSE}
+## Answer
+
+```{r Pairwise Comparison Full and Trimmed, echo=FALSE}
 
 # Prepare
 region_names <- unique(vacc_data_q6$Geography)
 num_regions <- length(region_names)
-index_2019 <- length(unique(vacc_data_q6$Birth.Year))  # index for 2019
+index_2019 <- length(unique(vacc_data_q6$Birth.Year))
 
 # Get Posterior samples
 samples_matrix <- do.call(rbind, as.mcmc(regression_Q6))
 beta0_samples <- samples_matrix[, grep("^beta0\\[", colnames(samples_matrix))]
 beta1_samples <- samples_matrix[, grep("^beta1\\[", colnames(samples_matrix))]
 
-# Storage for all pairwise ratio results
-all_ratios_df <- data.frame()
+# Storage
+posterior_ratios_df <- data.frame()
+summary_full <- data.frame()
 
-# Loop through all unique pairs
+# Loop through region pairs
 for (i in 1:(num_regions - 1)) {
   for (j in (i + 1):num_regions) {
-    
-    # Predicted coverage for both regions in 2019
+
     logit_A <- beta0_samples[, i] + beta1_samples[, i] * index_2019
     logit_B <- beta0_samples[, j] + beta1_samples[, j] * index_2019
-
     pi_A <- 1 / (1 + exp(-logit_A))
     pi_B <- 1 / (1 + exp(-logit_B))
-
-    # Ratio of coverage A to B
     ratio_samples <- pi_A / pi_B
 
-    # Add to results
-    all_ratios_df <- rbind(all_ratios_df, data.frame(
-      Region_A = region_names[i],
-      Region_B = region_names[j],
+    comparison_label <- paste0(region_names[i], " / ", region_names[j])
+
+    # Add to full summary
+    summary_full <- rbind(summary_full, data.frame(
+      Comparison = comparison_label,
       Mean_Ratio = round(mean(ratio_samples), 3),
       Lower_95 = round(quantile(ratio_samples, 0.025), 3),
       Upper_95 = round(quantile(ratio_samples, 0.975), 3)
+    ))
+
+    # Save all posterior draws for trimmed analysis
+    posterior_ratios_df <- rbind(posterior_ratios_df, data.frame(
+      Comparison = comparison_label,
+      Ratio = ratio_samples
     ))
   }
 }
 
 ```
 
-```{r Table  echo=FALSE}
-
-all_ratios_df %>%
+```{r Table Full, echo=FALSE}
+summary_full %>%
   knitr::kable(
-    format = "html",
+    format = "latex",
     booktabs = TRUE,
-    caption = "Pairwise comparisons of vaccination coverage ratios in 2019"
+    caption = "Full posterior comparisons of vaccination coverage ratios in 2019",
+    col.names = c("Comparison", "Mean Ratio", "Lower 95  CI", "Upper 95 CI")
   ) %>%
   kableExtra::kable_styling(latex_options = c("hold_position"))
-
-
 ```
 
-```{r Plotting Pairwise Ratios with 95% Credible Intervals echo=FALSE}
+```{r Table Trimmed, echo=FALSE}
 
-# Labels for each comparison
-all_ratios_df$Comparison <- paste0(all_ratios_df$Region_A, " / ", all_ratios_df$Region_B)
+posterior_ratios_trimmed <- posterior_ratios_df %>%
+  filter(Ratio > 0.5, Ratio < 2)
 
-# Plot
-ggplot(all_ratios_df, aes(x = reorder(Comparison, -Mean_Ratio), y = Mean_Ratio)) +
-  geom_point(size = 3, color = "#007C8A") +
-  geom_errorbar(aes(ymin = Lower_95, ymax = Upper_95), width = 0.2, color = "#007C8A") +
-  geom_hline(yintercept = 1, linetype = "dashed", color = "gray40") +
-  labs(
-    title = "Pairwise Coverage Ratios in 2019",
-    subtitle = "Mean with 95% credible intervals (Region A / Region B)",
-    x = "Region Comparison",
-    y = "Coverage Ratio"
-  ) +
-  coord_flip() +
-  theme_minimal(base_size = 12)
+summary_trimmed <- posterior_ratios_trimmed %>%
+  group_by(Comparison) %>%
+  summarise(
+    Mean_Ratio = round(mean(Ratio), 3),
+    Lower_95 = round(quantile(Ratio, 0.025), 3),
+    Upper_95 = round(quantile(Ratio, 0.975), 3)
+  )
+
+summary_trimmed %>%
+  knitr::kable(
+    format = "latex",
+    booktabs = TRUE,
+    caption = "Trimmed posterior comparisons of vaccination coverage ratios in 2019 (ratios limited to 0.5–2)",
+    col.names = c("Comparison", "Mean Ratio", "Lower 95  CI", "Upper 95 CI")
+  ) %>%
+  kableExtra::kable_styling(latex_options = c("hold_position"))
 
 ```
