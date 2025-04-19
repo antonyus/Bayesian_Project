@@ -843,7 +843,10 @@ I think there is something strange in this plot because the expected coverage
 (mean) is lower than in the previews table and much lower than th observations 
 which makes it strange since we used a vague prior right? mm...no I tried and I 
 get the same results. I was not expecting such a low mean for mississippi 
-actually. And also isent the cred interval unexpectedly wide?
+actually. And also isent the cred interval unexpectedly wide? I think it might 
+depend on the fact that our predicted variable is bounded 0-1 and some samnples
+are so close to zero that produce distorted results? Like absurdely samal or large
+probabilities?
 ```
 
 ```{r alternative plot, echo=FALSE}
@@ -963,7 +966,6 @@ vacc_data_2020 <- vacc_data_2020 %>%
 ```
 
 ```{r Predict number of vaccinated children using posterior draws, echo=FALSE}
-
 # Get posterior samples
 samples_matrix <- do.call(rbind, as.mcmc(regression_Q6))
 beta0_samples <- samples_matrix[, grep("^beta0\\[", colnames(samples_matrix))]
@@ -1025,7 +1027,9 @@ Sorry what does Pred_Mean stands for here? The predicted vacc cover for 2020
 taking the mean beta for region and year effect from the samples?
 
 ```
+## Interpretation
 
+Table 9 compares the observed number of vaccinated children in 2020 with the predictive distributions derived from earlier years. For each region, the observed counts fall within the 95% predictive intervals. Specifically, Georgia observed 165 vaccinations, which is above the posterior mean (119.2) but still within the upper bound of the predictive interval (188). Mississippi and Wisconsin also reported observed counts (161 and 156, respectively) that exceed their respective predictive means (32.1 and 130.8), yet remain within the upper bounds of their prediction intervals. These results suggest that while the observed values were higher than expected, particularly in Mississippi, they do not fall outside the plausible range defined by the model. Therefore, there is no strong statistical evidence to suggest that vaccination numbers in 2020 were inconsistent with historical trends, although the magnitude of the deviations (especially in Mississippi) may warrant further investigation. Nevertheless, the upper bound of the 95% predictive intervals correspond to the total sample size for that year and the lower bound to zero. A critical observation is that because the predicted probabilities are bounded between 0 and 1, the impact of predictor variables is asymmetric depending on the value of the predicted probability. At extreme probabilities, the logistic curve is steep, meaning small changes in predictors cause large shifts in the predicted probabilities, which can exaggerate the impact of those predictors. This can create over-fitting in regions with sparse data (near 0 or 1), leading to predictions that are too sensitive to small changes. We handle this issue in the next question. 
 
 \newpage
 
@@ -1036,7 +1040,6 @@ Interpret the results.
 ## Answer
 
 ```{r Pairwise Comparison Full and Trimmed, echo=FALSE}
-
 # Prepare
 region_names <- unique(vacc_data_q6$Geography)
 num_regions <- length(region_names)
@@ -1113,5 +1116,95 @@ summary_trimmed %>%
     col.names = c("Comparison", "Mean Ratio", "Lower 95  CI", "Upper 95 CI")
   ) %>%
   kableExtra::kable_styling(latex_options = c("hold_position"))
+```
+
+```{r log ratios, echo=FALSE}
+# Storage for log-ratio summaries
+summary_logratios <- data.frame()
+
+# Loop through region pairs
+for (i in 1:(num_regions - 1)) {
+  for (j in (i + 1):num_regions) {
+
+    logit_A <- beta0_samples[, i] + beta1_samples[, i] * index_2019
+    logit_B <- beta0_samples[, j] + beta1_samples[, j] * index_2019
+    pi_A <- 1 / (1 + exp(-logit_A))
+    pi_B <- 1 / (1 + exp(-logit_B))
+    log_ratio_samples <- log(pi_A) - log(pi_B)
+
+    comparison_label <- paste0(region_names[i], " / ", region_names[j])
+
+    # Append to summary
+    summary_logratios <- rbind(summary_logratios, data.frame(
+      Comparison = comparison_label,
+      Mean_Log_Ratio = round(mean(log_ratio_samples), 3),
+      Lower_95 = round(quantile(log_ratio_samples, 0.025), 3),
+      Upper_95 = round(quantile(log_ratio_samples, 0.975), 3)
+    ))
+  }
+}
+
+summary_logratios %>%
+  knitr::kable(
+    format = "latex",
+    booktabs = TRUE,
+    caption = "Log ratios of posterior comparisons of vaccination coverage ratios in 2019",
+    col.names = c("Comparison", "Mean Ratio", "Lower 95  CI", "Upper 95 CI")
+  ) %>%
+  kableExtra::kable_styling(latex_options = c("hold_position"))
 
 ```
+
+```{r densities, echo=FALSE, fig.cap="Posterior densities of vaccination coverage per region in year 2019."}
+samples_matrix <- do.call(rbind, as.mcmc(regression_Q6))
+
+# Extract beta0 and beta1 samples for each region
+beta0_samples <- samples_matrix[, grep("^beta0\\[", colnames(samples_matrix))]
+beta1_samples <- samples_matrix[, grep("^beta1\\[", colnames(samples_matrix))]
+
+# Set BirthYear for 2019
+year_2019 <- 2019
+
+# Initialize matrix for predicted probabilities (coverage) for 2019
+n_samples <- nrow(beta0_samples)  # Number of MCMC samples
+n_regions <- ncol(beta0_samples)  # Number of regions
+
+predicted_pi_2019 <- matrix(NA, nrow = n_samples, ncol = n_regions)
+
+# Calculate inverse logit for 2019 for each region
+for (i in 1:n_regions) {
+  # Compute logit(pi) for 2019 for each posterior sample
+  logit_pi_2019 <- beta0_samples[, i] + beta1_samples[, i] * year_2019
+  
+  # Apply inverse logit to calculate pi (vaccination probability)
+  predicted_pi_2019[, i] <- 1 / (1 + exp(-logit_pi_2019))
+}
+
+# Check the first few rows of predicted probabilities for 2019
+head(predicted_pi_2019)
+
+# Convert predicted probabilities to a data frame for ggplot
+predicted_pi_2019_df <- as.data.frame(predicted_pi_2019)
+colnames(predicted_pi_2019_df) <- region_levels  # Set region names as column names
+
+# Gather data for ggplot
+predicted_pi_2019_long <- tidyr::pivot_longer(predicted_pi_2019_df, cols = everything(), names_to = "Region", values_to = "PredictedProbability")
+
+# Plot the posterior distributions for 2019 probabilities
+ggplot(predicted_pi_2019_long, aes(x = PredictedProbability, fill = Region)) +
+  geom_density(alpha = 0.5) +
+  labs(
+    title = "Density of Predicted Vaccination Probabilities for 2019",
+    x = "Predicted Probability",
+    y = "Density",
+    fill = "Region"
+  ) +
+  theme_minimal()
+
+```
+
+## Interpretation
+
+Table 10 presents the pairwise mean ratios of vaccination coverage across regions in 2019. Given that coverage values are constrained between 0 and 1, calculating ratios of posterior samples can result in extreme values when the denominator approaches zero. This issue arises even when the majority of posterior mass lies within a high-coverage range (e.g., 80–90%), as occasional draws near zero (e.g., 0.0001 or 0.001) can disproportionately inflate the resulting ratios. To address this, we apply two alternative strategies. First, in Table 11, we restrict the ratio distribution to a plausible range (e.g., 0.5–2.0), effectively trimming the influence of extreme outliers. Second, in Table 12, we present the distribution of log-transformed ratios, which better captures relative differences in a more stable and symmetric manner. Finally, the plot below provides posterior density to visually assess the degree of overlap in vaccination coverage between regions.
+
+Visual inspection of the posterior distributions suggests that Georgia has a higher expected vaccination coverage than Mississippi, which in turn appears to exceed that of Wisconsin. Nonetheless, when examining trimmed posterior ratios, the mean values for all state pairs cluster near 1.0, and the corresponding 95% credible intervals include 1. This indicates that, although point estimates imply a potential ordering (Georgia > Mississippi > Wisconsin), the uncertainty is substantial enough that we cannot confidently reject the hypothesis of equal coverage among these states. 
