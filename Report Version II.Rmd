@@ -371,7 +371,7 @@ fit <- jags(
 Overall, the full code is:
 
 ```{r Q2 model log reg in BUGS, echo=TRUE}
-# Model structure assuming one intercept and slop for all regions
+# Model structure assuming one intercept and one slope for all regions
 model_structure <- " 
 model {
   for (i in 1:N_region) {  # Loop over regions
@@ -467,7 +467,7 @@ The convergence of the model has been inspected visually (traces plots) and nume
 Make a plot of the posterior densities and give summary measures of the posterior distributions of the model parameters. Interpret the results.
 
 ## Answer
-The posterior density for \(\beta_0\) should captures the baseline vaccination coverage when year of birth is zero. Therefore, here it does not have a direct interpretation in terms of vaccination coverage, but it is still necessary for the model. Looking at \(\beta_1\)posterior density we see that is centered very close to 0, and its mass spans both positive and negative values. This means that the effect of year of birth is limited and there is high uncertainty regarding its estimate. This might also be caused by the fact that we did re-scale the variable \(year of birth\) and consequently uncertainty gets amplified due to the large magnitude of the numerical value when taken as face value (see answer to questions 6 to 10 on this). Posterior summary measures for \(\beta_0\) and \(\beta_1\) are provided in table 3. If we then apply the inverse logit transformation to the linear predictor we can obtain the estimated vaccination coverage per year by using as \(\beta_0\) and \(\beta_1\) their mean. Data are reported in the table 4 below and indeed reflect an approximate vaccination around 90%. 
+The posterior density for \(\beta_0\) should captures the baseline vaccination coverage when year of birth is zero. Therefore, here it does not have a direct interpretation in terms of vaccination coverage, but it is still necessary for the model. Looking at \(\beta_1\)posterior density we see that is centered very close to 0, and its mass spans both positive and negative values. This means that the effect of year of birth is limited and there is high uncertainty regarding its estimate. This might also be caused by the fact that we did re-scale the variable *year of birth* and consequently uncertainty gets amplified due to the large magnitude of the numerical value when taken as face value (see answer to questions 6 to 10 on this). Posterior summary measures for \(\beta_0\) and \(\beta_1\) are provided in table 3. If we then apply the inverse logit transformation to the linear predictor we can obtain the estimated vaccination coverage per year by using as \(\beta_0\) and \(\beta_1\) their mean. Data are reported in the table 4 below and indeed reflect an approximate vaccination around 90%. 
 
 ```{r posterior density plots Q4, echo=FALSE, fig.cap="Posterior density plots for the logistic model in question 2"}
 # Convert the data from a list *(mcmc_samples) into a data frame with 
@@ -589,7 +589,7 @@ Use data from the years 2011-2019. Assume non-informative priors for the paramet
 
 ## Answer  
 
-To evaluate whether trends in vaccination coverage differ across regions, we use a hierarchical logistic regression model. The number of vaccinated children in each region and birth year is assumed to follow a Binomial distribution with region-specific probabilities. In addition, we decided to re-scale the variable \(year of birth\) in the attempt of making the model numerically more stable and give to \(\beta_0\) a more interpretable meaning. Years of birth were centered around their mean, without dividing by the standard deviation.
+To evaluate whether trends in vaccination coverage differ across regions, we use a hierarchical logistic regression model. The number of vaccinated children in each region and birth year is assumed to follow a Binomial distribution with region-specific probabilities. In addition, we decided to re-scale the variable *year of birth* in the attempt of making the model numerically more stable and give to \(\beta_0\) a more interpretable meaning. Years of birth were centered around their mean, without dividing by the standard deviation.
 
 $$
 \begin{aligned}
@@ -836,7 +836,7 @@ posterior_prob_df %>%
 
 ## Interpretation
 
-The posterior probabilities represent the likelihood that vaccination coverage is increasing in each region, based on the posterior distribution of the slope \( \beta_{1i} \). A probability close to 1 suggests strong evidence of a positive trend over time, while values near 0.5 reflect uncertainty or no clear directional change. If a region exhibits a posterior probability above 0.95, it provides strong Bayesian evidence for an increase in vaccination coverage. On the other hand, probabilities near or below 0.5 may indicate stability or even a potential decline. In this case, Mississippi shows strong evidence for an increase in coverage, with a posterior probability greater than 0.95. This indicates a high degree of confidence (from a Bayesian perspective) that vaccination coverage is increasing in this region. By contrast, the probability is low in the other regions, underscoring a probable decrease in coverage over the years. 
+The posterior probabilities represent the likelihood that vaccination coverage is increasing in each region, based on the posterior distribution of the slope \( \beta_{1i} \). A probability close to 1 suggests strong evidence of a positive trend over time, while values near 0.5 reflect uncertainty or no clear directional change. If a region exhibits a posterior probability above 0.95, it provides strong Bayesian evidence for an increase in vaccination coverage. On the other hand, probabilities near or below 0.5 may indicate stability or even a potential decline. In this case, Mississippi shows strong evidence for an increase in coverage, with a posterior probability greater than 0.95. This indicates a high degree of confidence (from a Bayesian perspective) that vaccination coverage is increasing in this region. By contrast, the probability is low in the other regions, underscoring a probable decrease or stagnation in coverage over the years, indeed in model from question two, when aggregating data from all regions (same intercept for all regions) the prediction was approximately 90% for all years. 
 
 
 \newpage
@@ -926,9 +926,9 @@ merged_data_full <- plot_data
 
 The following plot shows the estimated vaccination coverage by region and birth year, along with 95% credible intervals for the model estimates. 
 
-As mentioned above, for this model we decided to rescale the variable \(year of birth\). Initially, when calculating the 95% credible interval using the row data set for predictors we noticed the inverse-logit transformation was unstable. Without appropriate scaling, the inverse-logit transformation of large linear predictors such as year of birth produced very wide credible intervals approaching 0 and 1, making them uninformative. Possible solutions could be re-scaling of the variable \(year of birth\) that could lead to large linear predictor values when multiplied by slope coefficients; regularizing priors in order to reduce its variance and prevent implausible values; cap the range of the linear predictor before applying the inverse logit transformation while preserving the validity of the model. The first solution was chosen as it was computationally economic and also data driven.
+As mentioned above, for this model we decided to re-scale the variable *year of birth*. Initially, when calculating the 95% credible interval using the row data set, we noticed that the inverse-logit transformation was unstable. Without appropriate scaling, the inverse-logit transformation of large linear predictors such as *year of birth* (2011-2020 treated a snumeric) produced very wide credible intervals approaching 0 and 1, therefore making them uninformative. Possible solutions could have been re-scaling of the variable *year of birth*; regularizing priors in order to reduce its variance and prevent implausible values; cap the range of the linear predictor before applying the inverse logit transformation. The first solution was chosen as it was computationally economic and also data driven.
 
-Therefore, in the plot, observed rates are the white centered dots. Estimated credible intervals are represented by the vertical solid lines. Predicted coverage are the full dots. Years are reported on centered scale where 2011 corresponds to -4.5 and 2019 to 3.5 with the other years at one unit interval.
+Therefore, in the plot, observed rates are the white centered dots. Estimated credible intervals are represented by the shaded areas. Predicted coverage are the full triangular marks. Years are reported on centered scale where 2011 corresponds to -4.5 and 2019 to 3.5 with the other years at one unit interval.
 
 ```{r Plot, echo=FALSE, fig.cap="Estimated vaccination coverage by region and birth year. Observed rates are white centered dot, Shaded area: stimated credible interval; Full dots: predicted coverage. Years are reported on centered scale where 2011 corresponds to -4.5 and 2019 to 3.5 with the other years at one unit interval"}
 # Final ggplot
@@ -980,7 +980,6 @@ ggplot() +
 Investigate whether the observed number of vaccinated children in 2020 is in line with the expectations from earlier years. For this, compare the observed number of vaccinated children in 2020 with the prediction intervals for number of vaccinated children in 2020.
 
 ## Answer
-
 
 ```{r Filter observed 2020 data, echo=FALSE}
 # Filter vaccination data for 2020
@@ -1053,11 +1052,11 @@ results_q9 %>%
 
 ## Interpretation
 
-Table 9 compares the observed number of vaccinated children in 2020 with the predictive distributions derived from earlier years. For each region, the observed counts fall outside the 95% predictive intervals, indicating that actual vaccination numbers were consistently lower than what the model predicted.
+Table 9 compares the observed number of vaccinated children in 2020 with the predictive distributions derived from earlier years. For each region, the observed counts fall outside the 95% predictive intervals, indicating that actual vaccination numbers were consistently lower than what the model predicted for the year 2020.
 
 Specifically, Georgia observed 165 vaccinations, which is below the lower bound of the 95% predictive interval [172, 186]. Mississippi observed 161, which is also below its interval [171, 180]. Wisconsin observed 156, falling below the lower bound of [158, 173].
 
-These results suggest that vaccination counts in all three states were significantly lower than expected based on historical data and model predictions. This might indicate that year of birth is not a good predictor of vaccination coverage or that in 2020 other factors not captured in the model contributed to a change in the rate of vaccinated people. 
+These results suggest that vaccination counts in all three states were significantly lower than expected based on historical data and model predictions. This might indicate that year of birth is not a good predictor of vaccination coverage or that in 2020 other factors (not captured in the model) contributed to a change in the rate of vaccinated people. 
 
 
 
@@ -1074,9 +1073,9 @@ Georgia vs. Mississippi: The mean ratio is 0.958 with a 95% credible interval of
 
 Georgia vs. Wisconsin: The mean ratio is 1.045 with a credible interval of [0.952, 1.150]. Again, the interval includes 1, so the difference is not statistically significant, although the point estimate suggests slightly higher coverage in Georgia.
 
-Mississippi vs. Wisconsin: The mean ratio is 1.090 with a 95% credible interval of [1.012, 1.190]. Since this interval does not include 1, we conclude that Mississippi had significantly higher vaccination coverage than Wisconsin in 2019.
+Mississippi vs. Wisconsin: The mean ratio is 1.090 with a 95% credible interval of [1.012, 1.190]. Since this interval does not include 1, we might conclude that Mississippi had significantly higher vaccination coverage than Wisconsin in 2019, despite the difference seems marginal.
 
-These results indicate that among the three regions, only the difference between Mississippi and Wisconsin is statistically credible. Differences involving Georgia are inconclusive based on the posterior comparisons.
+These results indicate that among the three regions, only the difference between Mississippi and Wisconsin is statistically credible. Differences involving Georgia are inconclusive based on the posterior comparisons. Overall, the vaccination rates are similar across regions and years and actually fluctuate arund the mean value from one year to the other.
 
 ```{r Pairwise Comparison, echo=FALSE}
 # Prepare
